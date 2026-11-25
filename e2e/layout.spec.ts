@@ -41,9 +41,26 @@ test('desktop sidebar stays pinned with the user card at the bottom while the pa
   await expect(user).toHaveAccessibleName(['Signed in as', name, text].filter(Boolean).join(' '));
   await expect(page.getByTestId('sign-out')).toHaveAccessibleName('Sign out');
 
-  // Still no horizontal scroll after switching overflow-x to clip.
-  const widths = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
-  expect(widths[0]).toBeLessThanOrEqual(widths[1]);
+  // overflow-x: clip hides page-wide overflow from scrollWidth, so measure element boxes instead: nothing in
+  // main may poke past the viewport unless an inner overflow container (e.g. a scrolling chip row) clips it.
+  const outside = await page.evaluate(() => {
+    const width = document.documentElement.clientWidth;
+    const main = document.getElementById('main')!;
+    const clippedInside = (el: Element) => {
+      for (let p = el.parentElement; p && p !== main; p = p.parentElement) {
+        if (getComputedStyle(p).overflowX !== 'visible') return true;
+      }
+      return false;
+    };
+    return [...main.querySelectorAll('*')]
+      .filter((el) => {
+        const b = el.getBoundingClientRect();
+        return b.width && b.right > width + 1 && !clippedInside(el);
+      })
+      .slice(0, 8)
+      .map((el) => el.outerHTML.slice(0, 200));
+  });
+  expect(outside, 'elements past the right edge of the viewport').toEqual([]);
 });
 
 test('desktop sidebar stays pinned while Quick Add is open and the page is scrolled', async ({ page }) => {
@@ -72,7 +89,8 @@ test('desktop sidebar stays pinned while Quick Add is open and the page is scrol
 
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('quick-add-modal')).toBeHidden();
-  expect(await page.evaluate(() => document.documentElement.style.overflow)).toBe('');
+  // The Modal unlocks in an effect cleanup that can land just after the node is gone.
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.overflow)).toBe('');
 });
 
 test('at 390px the desktop sidebar is hidden and the bottom nav shows', async ({ page }) => {
