@@ -86,6 +86,8 @@ export interface Settings {
   theme: ThemePref;
   name: string;
   lastAccountId: string | null;
+  /** First-run onboarding finished (stored in the cloud settings row). */
+  onboarded: boolean;
 }
 
 export interface DataState {

@@ -1,9 +1,8 @@
 import { create } from 'zustand';
 import { useMemo } from 'react';
 import type { Account, Backup, Budget, Category, DataState, Goal, GoalContribution, RecurringRule, Settings, Transaction } from './types';
-import { KEYS, SLICES, loadAll, parseRemote, saveMeta, writeJSON } from './persist';
-import { useUI } from './ui';
-import { buildSeed } from '../data/seed';
+import { DEFAULT_SETTINGS } from './validate';
+import { markExplicitRestores } from '../sync/explicit';
 import { generateDue, occurrenceTxId, txFromRule } from './engine';
 import { todayISO, toISODate, type ISODate } from '../lib/dates';
 import { addDays, differenceInCalendarDays, parseISO } from 'date-fns';
@@ -40,26 +39,32 @@ export interface Store extends DataState {
   removeContribution(goalId: string, contributionId: string): void;
 
   updateSettings(patch: Partial<Settings>): void;
-  resetDemo(): void;
-  clearAll(): void;
+  /** Auto-post recurring occurrences that fell due (idempotent: deterministic ids + postedThrough). */
+  runDue(): void;
+  /** First-run setup: default categories (if none), the first account and profile settings. */
+  completeOnboarding(o: { name: string; currency: Settings['currency']; account: Omit<Account, 'id' | 'archived' | 'color'> & { color?: string } }): Account;
+  /** Merge data from another source (legacy device data) into the account; items with the same id are replaced. */
+  mergeData(data: DataState, settings?: Partial<Settings>): void;
   restoreBackup(b: Backup): void;
   exportBackup(): Backup;
 }
 
-function initialState(): { data: DataState; settings: Settings } {
-  const loaded = loadAll();
-  if (!loaded.initialized) {
-    const seed = buildSeed();
-    return { data: seed, settings: loaded.settings };
-  }
-  return { data: generateDue(loaded.data, todayISO()), settings: loaded.settings };
+export function emptyData(): DataState {
+  return { categories: [], accounts: [], transactions: [], budgets: [], recurring: [], goals: [] };
 }
 
-const init = initialState();
+function mergeById<T extends { id: string }>(base: T[], incoming: T[]): T[] {
+  if (incoming.length === 0) return base;
+  const byId = new Map(incoming.map((x) => [x.id, x]));
+  const out = base.map((x) => byId.get(x.id) ?? x);
+  const have = new Set(base.map((x) => x.id));
+  for (const x of incoming) if (!have.has(x.id)) out.push(x);
+  return out;
+}
 
 export const useStore = create<Store>()((set, get) => ({
-  ...init.data,
-  settings: init.settings,
+  ...emptyData(),
+  settings: { ...DEFAULT_SETTINGS },
 
   addTransaction(t) {
     const tx: Transaction = { ...t, id: uid('tx_'), createdAt: Date.now() };
@@ -201,21 +206,45 @@ export const useStore = create<Store>()((set, get) => ({
   updateSettings(patch) {
     set((s) => ({ settings: { ...s.settings, ...patch } }));
   },
-  resetDemo() {
-    const seed = buildSeed();
-    set((s) => ({ ...seed, settings: { ...s.settings, lastAccountId: null } }));
+  runDue() {
+    set((s) => {
+      const next = generateDue(s, todayISO());
+      return next === s ? s : { recurring: next.recurring, transactions: next.transactions };
+    });
   },
-  clearAll() {
+  completeOnboarding({ name, currency, account }) {
+    const acc: Account = { id: uid('acc_'), name: account.name, type: account.type, openingBalance: account.openingBalance, color: account.color ?? '#10b981', archived: false };
     set((s) => ({
-      categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
-      accounts: [], transactions: [], budgets: [], recurring: [], goals: [],
-      settings: { ...s.settings, lastAccountId: null },
+      categories: s.categories.length > 0 ? s.categories : DEFAULT_CATEGORIES.map((c) => ({ ...c })),
+      accounts: [...s.accounts, acc],
+      settings: { ...s.settings, name: name.trim().slice(0, 40), currency, lastAccountId: acc.id, onboarded: true },
     }));
+    return acc;
+  },
+  mergeData(data, settings) {
+    // Imported occurrences are the user's own records, not auto-posts: upload them even if once deleted.
+    const have = new Set(get().transactions.map((t) => t.id));
+    markExplicitRestores(data.transactions.map((t) => t.id).filter((id) => !have.has(id)));
+    set((s) => {
+      const merged: DataState = {
+        categories: mergeById(s.categories, data.categories),
+        accounts: mergeById(s.accounts, data.accounts),
+        transactions: mergeById(s.transactions, data.transactions),
+        budgets: mergeById(s.budgets, data.budgets),
+        recurring: mergeById(s.recurring, data.recurring),
+        goals: mergeById(s.goals, data.goals),
+      };
+      if (merged.categories.length === 0) merged.categories = DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+      return { ...generateDue(merged, todayISO()), settings: { ...s.settings, ...settings } };
+    });
   },
   restoreBackup(b) {
+    // "Restore replaces all data": occurrences in the backup must come back even if they were deleted (tombstoned).
+    const have = new Set(get().transactions.map((t) => t.id));
+    markExplicitRestores(b.transactions.map((t) => t.id).filter((id) => !have.has(id)));
     set(() => ({
       ...generateDue({ categories: b.categories, accounts: b.accounts, transactions: b.transactions, budgets: b.budgets, recurring: b.recurring, goals: b.goals }, todayISO()),
-      settings: b.settings,
+      settings: { ...b.settings, onboarded: true },
     }));
   },
   exportBackup() {
@@ -226,65 +255,6 @@ export const useStore = create<Store>()((set, get) => ({
     };
   },
 }));
-
-// ---- Persistence: write slices that changed (by reference) ----
-let lastFailureToast = 0;
-function reportSaveFailure() {
-  const now = Date.now();
-  if (now - lastFailureToast < 10_000) return;
-  lastFailureToast = now;
-  useUI.getState().toast({
-    message: "Couldn't save your changes — browser storage is full or blocked. Download a backup from Settings.",
-    tone: 'danger',
-    duration: 8000,
-  });
-}
-
-function persistAll(s: Store) {
-  let ok = true;
-  for (const k of SLICES) ok = writeJSON(KEYS[k], s[k]) && ok;
-  ok = writeJSON(KEYS.settings, s.settings) && ok;
-  ok = saveMeta() && ok;
-  if (!ok) reportSaveFailure();
-}
-persistAll(useStore.getState());
-
-/** True while applying a change that another tab already wrote, so we don't write it back. */
-let applyingRemote = false;
-
-useStore.subscribe((s, prev) => {
-  if (applyingRemote) return;
-  let dirty = false;
-  let ok = true;
-  for (const k of SLICES) {
-    if (s[k] !== prev[k]) {
-      ok = writeJSON(KEYS[k], s[k]) && ok;
-      dirty = true;
-    }
-  }
-  if (s.settings !== prev.settings) {
-    ok = writeJSON(KEYS.settings, s.settings) && ok;
-    dirty = true;
-  }
-  if (dirty) ok = saveMeta() && ok;
-  if (!ok) reportSaveFailure();
-});
-
-// ---- Cross-tab sync: another tab wrote a slice → adopt it, so neither tab overwrites the other's changes ----
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (e) => {
-    if (e.storageArea !== window.localStorage) return;
-    const change = parseRemote(e.key, e.newValue);
-    if (!change) return;
-    applyingRemote = true;
-    try {
-      if (change.kind === 'settings') useStore.setState({ settings: change.value });
-      else useStore.setState({ [change.slice]: change.value } as Partial<Store>);
-    } finally {
-      applyingRemote = false;
-    }
-  });
-}
 
 // ---- Convenience hooks ----
 export const useCurrency = () => useStore((s) => s.settings.currency);

@@ -8,3 +8,7 @@ playwright-report
 *.log
 .DS_Store
 .env*
+.env*.local
+.env.e2e
+e2e/.auth
+supabase/.temp/

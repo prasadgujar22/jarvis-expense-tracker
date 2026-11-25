@@ -6,6 +6,7 @@ import { Logo } from './Logo';
 import { cn } from '../../lib/cn';
 import { useUI } from '../../store/ui';
 import { Button } from '../ui/Button';
+import { SidebarUser } from '../../auth/UserCard';
 
 export function Sidebar() {
   const path = matchRoute(usePath());
@@ -44,10 +45,7 @@ export function Sidebar() {
           })}
         </ul>
       </nav>
-      <div className="mt-auto rounded-2xl border border-line bg-gradient-to-br from-accent-soft to-transparent p-4">
-        <p className="text-xs font-semibold text-fg">Private by design</p>
-        <p className="mt-1 text-xs text-muted">Your data never leaves this device. Works offline.</p>
-      </div>
+      <SidebarUser />
     </aside>
   );
 }

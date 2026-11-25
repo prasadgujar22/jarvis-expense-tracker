@@ -20,13 +20,13 @@ Inspired by what today's leading trackers offer (YNAB, Monarch Money, Copilot Mo
 - **Insights**: top categories, biggest expenses, month-over-month change by category, average daily spend, a weekday pattern and plain-language insight cards
 - **Search and filters**: text, date presets or a custom range, type, categories, account, amount range and sort, grouped by day with daily totals
 - **Savings goals**: target, deadline, contributions, a progress ring and the monthly saving needed
-- **Your data**: CSV export, CSV import with column mapping, JSON backup and restore, reset to demo data, and clear all
+- **Your data**: CSV export, CSV import with column mapping, JSON backup and restore (restores into your account), and clear all data with typed confirmation
 - **INR first**: ₹ with Indian lakh grouping by default, with INR, USD, EUR, GBP, AED or SGD for display
 - **Dark, light and system themes**, a responsive desktop sidebar and mobile bottom nav, and an installable PWA that works offline
 - **Accessible**: keyboard navigation, focus-trapped dialogs, ARIA labels and WCAG AA contrast checked with axe
 
 ### Not included (these need a backend)
-Bank or SMS auto-sync, shared household wallets, AI receipt scanning and cross-device sync. Kosh stores everything locally under `kosh:v1:*` in `localStorage`. Your data never leaves your device.
+Bank or SMS auto-sync, shared household wallets and AI receipt scanning. Each user signs in (email + password or magic link) and their data lives in Supabase under row-level security, with a per-user offline cache in `localStorage` (`kosh:v2:<userId>:*`) and a retry queue that syncs when the device is back online.
 
 ## Screenshots
 
@@ -46,11 +46,12 @@ npm run typecheck
 ```
 
 ## Tests
-The Playwright E2E suite covers desktop at 1440×900 and mobile at 390×844. It tests every page, the workflows, persistence, console errors, overflow, and axe accessibility and contrast checks in both themes.
+The Playwright E2E suite runs against the real Supabase project with two confirmed test users. Global setup signs each user in once, wipes their rows through the API (RLS-scoped), and saves a storageState per user. Tests run serially (one worker). Desktop (1440×900) runs everything: auth, onboarding, CRUD persistence across reloads and new contexts, recurring idempotency, offline sync, cross-tab sync, legacy import, RLS, and backup/restore. Mobile (390×844) runs the auth screens and the empty-state, overflow, console and axe checks in both themes.
+
 ```bash
-npx playwright install chromium
-npm run build && npm run test:e2e
-BASE_URL=https://jarvis-expense-tracker.vercel.app npm run test:e2e   # against the live site
+# needs VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY (.env.local) and E2E_USER_{A,B}_{EMAIL,PASSWORD}
+set -a; source /path/to/e2e.env; set +a
+npm run build && npm run test:e2e            # serves dist with vite preview on :4317 (PORT=… to change)
 ```
 
 ## Deploy

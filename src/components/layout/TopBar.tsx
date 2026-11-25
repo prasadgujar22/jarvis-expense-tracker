@@ -2,6 +2,7 @@ import { Search } from 'lucide-react';
 import { Link } from '../../router';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
+import { SyncIndicator } from '../../sync/SyncIndicator';
 import { useUI } from '../../store/ui';
 
 export function TopBar() {
@@ -25,7 +26,8 @@ export function TopBar() {
           <span className="sr-only sm:not-sr-only">Search or jump to…</span>
           <kbd aria-hidden="true" className="ml-auto hidden rounded-md border border-line bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-muted sm:inline">{isMac ? '⌘' : 'Ctrl'} K</kbd>
         </button>
-        <div className="flex items-center gap-1 lg:ml-auto">
+        <div className="flex items-center gap-1.5 lg:ml-auto">
+          <SyncIndicator />
           <ThemeToggle />
         </div>
       </div>

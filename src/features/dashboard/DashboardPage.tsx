@@ -36,7 +36,6 @@ export default function DashboardPage() {
   const budgets = useStore((s) => s.budgets);
   const recurring = useStore((s) => s.recurring);
   const name = useStore((s) => s.settings.name);
-  const resetDemo = useStore((s) => s.resetDemo);
   const cats = useCategoryMap();
   const accs = useAccountMap();
   const fmt = useFormatMoney();
@@ -75,14 +74,11 @@ export default function DashboardPage() {
           <EmptyState
             icon={Sparkles}
             title="A fresh start"
-            description="Kosh is empty. Add an account to begin tracking — or load realistic demo data to explore."
+            description="Kosh is empty. Add an account to begin tracking your money."
             action={
               <>
                 <Button variant="primary" icon={<Landmark className="h-4 w-4" aria-hidden />} onClick={() => navigate('/accounts')} data-testid="empty-add-account">
                   Add an account
-                </Button>
-                <Button onClick={() => { resetDemo(); toast({ message: 'Demo data loaded', tone: 'success' }); }} data-testid="empty-load-demo">
-                  Load demo data
                 </Button>
               </>
             }
