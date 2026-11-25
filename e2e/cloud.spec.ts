@@ -136,6 +136,7 @@ test('budgets, goals and recurring rules: basic CRUD persists to the cloud', asy
   // Budget
   await open(page, 'budgets');
   await page.getByTestId('add-budget').click();
+  await page.getByTestId('budget-category').selectOption('__overall');
   await page.getByTestId('budget-amount').fill('20000');
   await page.getByTestId('budget-submit').click();
   const overall = page.locator('[data-testid="budget-card"][data-budget="overall"]');
