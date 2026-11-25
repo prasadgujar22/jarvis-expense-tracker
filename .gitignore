@@ -1,0 +1,9 @@
+node_modules
+dist
+dev-dist
+test-artifacts
+test-results
+playwright-report
+.vercel
+*.log
+.DS_Store
