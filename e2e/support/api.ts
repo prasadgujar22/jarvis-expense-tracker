@@ -8,7 +8,7 @@ interface Tokens {
   [k: string]: { accessToken: string; userId: string };
 }
 function tokens(): Tokens {
-  return JSON.parse(readFileSync(tokenFile, 'utf8')) as Tokens;
+  return JSON.parse(process.env.E2E_PREVIEW_TOKENS ?? readFileSync(tokenFile, 'utf8')) as Tokens;
 }
 
 /** A Supabase client acting as that test user (RLS applies), using the access token from global setup. */

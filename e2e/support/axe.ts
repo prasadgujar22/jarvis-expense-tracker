@@ -6,7 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 export async function checkA11y(page: Page, artifact: string) {
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   await mkdir('test-artifacts/axe', { recursive: true });
-  await page.screenshot({ path: 'test-artifacts/' + artifact + '.png', fullPage: true, animations: 'disabled' });
+  await page.screenshot({ path: 'test-artifacts/' + artifact + '.png', fullPage: true, animations: 'disabled', style: '[data-testid="user-email"] { visibility: hidden; }' });
   const results = await new AxeBuilder({ page }).analyze();
   const contrast = results.violations.filter((r) => r.id === 'color-contrast');
   const severe = results.violations.filter(

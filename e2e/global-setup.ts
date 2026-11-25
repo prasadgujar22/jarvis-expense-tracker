@@ -1,3 +1,4 @@
+import { chromium, type BrowserContext } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { AUTH_DIR, BASE_URL, SUPABASE_KEY, SUPABASE_URL, USERS, stateFile, tokenFile, type UserKey } from './support/env';
@@ -27,6 +28,24 @@ import { DEFAULT_CATEGORIES } from '../src/data/categories';
 export default async function globalSetup() {
   mkdirSync(AUTH_DIR, { recursive: true });
   const origin = new URL(BASE_URL).origin;
+  const cookies: Awaited<ReturnType<BrowserContext['cookies']>> = [];
+  const shareURL = process.env.VERCEL_SHARE_URL;
+  if (shareURL) {
+    if (new URL(shareURL).origin !== origin) throw new Error('VERCEL_SHARE_URL must match BASE_URL');
+    const browser = await chromium.launch();
+    try {
+      const context = await browser.newContext({ serviceWorkers: 'block' });
+      const page = await context.newPage();
+      const response = await page.goto(shareURL, { waitUntil: 'domcontentloaded' }).catch(() => null);
+      cookies.push(...(await context.cookies(origin)).filter((cookie) => cookie.name === '_vercel_jwt'));
+      if (!cookies.length) throw new Error('Vercel share link did not set _vercel_jwt (HTTP ' + (response?.status() ?? 'unavailable') + ')');
+      process.env.E2E_VERCEL_STATE = JSON.stringify({ cookies, origins: [] });
+      // Playwright's automatic failure snapshots can include the signed-in email.
+      process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1';
+    } finally {
+      await browser.close();
+    }
+  }
   const tokens: Record<string, { accessToken: string; userId: string }> = {};
   for (const key of Object.keys(USERS) as UserKey[]) {
     const mem = new Map<string, string>();
@@ -62,7 +81,10 @@ export default async function globalSetup() {
     }
     tokens[key] = { accessToken: data.session.access_token, userId };
     const localStorage = [...mem.entries()].filter(([k]) => k.startsWith('sb-')).map(([name, value]) => ({ name, value }));
-    writeFileSync(stateFile(key), JSON.stringify({ cookies: [], origins: [{ origin, localStorage }] }, null, 2));
+    const state = JSON.stringify({ cookies, origins: [{ origin, localStorage }] }, null, 2);
+    if (shareURL) process.env['E2E_PREVIEW_STATE_' + key] = state;
+    else writeFileSync(stateFile(key), state);
   }
-  writeFileSync(tokenFile, JSON.stringify(tokens));
+  if (shareURL) process.env.E2E_PREVIEW_TOKENS = JSON.stringify(tokens);
+  else writeFileSync(tokenFile, JSON.stringify(tokens));
 }

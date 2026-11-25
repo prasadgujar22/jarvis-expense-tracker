@@ -36,19 +36,31 @@ export async function freezeDate(page: Page, at: Date) {
   }, at.getTime());
 }
 
+export function signedOutState() {
+  const state = process.env.E2E_VERCEL_STATE;
+  return state ? JSON.parse(state) : undefined;
+}
+
 export const test = base.extend({
+  storageState: async ({ storageState }, use) => {
+    await use(storageState ?? signedOutState());
+  },
   page: async ({ page }, use) => {
     await freezeDate(page, FIXED_NOW);
     await use(page);
   },
 });
 
-export const asUser = (u: UserKey) => ({ storageState: stateFile(u) });
+export const asUser = (u: UserKey) => ({
+  storageState: process.env['E2E_PREVIEW_STATE_' + u]
+    ? JSON.parse(process.env['E2E_PREVIEW_STATE_' + u]!)
+    : stateFile(u),
+});
 
 /** A brand-new browser context for the same user (fresh memory and no local cache besides the session). */
 export async function newUserContext(browser: Browser, info: TestInfo, user: UserKey, at: Date = FIXED_NOW) {
   const { baseURL, viewport, isMobile, hasTouch, colorScheme, reducedMotion, locale, timezoneId } = info.project.use;
-  const context = await browser.newContext({ baseURL, viewport, isMobile, hasTouch, colorScheme, reducedMotion, locale, timezoneId, serviceWorkers: 'block', storageState: stateFile(user) });
+  const context = await browser.newContext({ baseURL, viewport, isMobile, hasTouch, colorScheme, reducedMotion, locale, timezoneId, serviceWorkers: 'block', ...asUser(user) });
   const page = await context.newPage();
   await freezeDate(page, at);
   return { context, page };

@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test';
-import { asUser, expense, open, ready, row, setTheme, submitTransaction, synced, test } from './fixtures';
+import { asUser, expense, open, ready, row, setTheme, signedOutState, submitTransaction, synced, test } from './fixtures';
 
+const previewPrefix = process.env.VERCEL_SHARE_URL ? 'preview-' : '';
 const desktop = { width: 1440, height: 900 };
 const mobile = { width: 390, height: 844 };
 
@@ -18,12 +19,12 @@ test('capture the signed-out login at both sizes and in both desktop themes', as
   await page.goto('/login');
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
   await setTheme(page, 'dark');
-  await capture(page, 'auth-login-desktop');
+  await capture(page, previewPrefix ? 'preview-login-desktop' : 'auth-login-desktop');
   await setTheme(page, 'light');
-  await capture(page, 'auth-login-desktop-light');
+  if (!previewPrefix) await capture(page, 'auth-login-desktop-light');
 
   const context = await browser.newContext({
-    baseURL, viewport: mobile, isMobile: true, hasTouch: true, colorScheme: 'dark',
+    storageState: signedOutState(), baseURL, viewport: mobile, isMobile: true, hasTouch: true, colorScheme: 'dark',
     reducedMotion: 'reduce', serviceWorkers: 'block',
   });
   try {
@@ -31,7 +32,7 @@ test('capture the signed-out login at both sizes and in both desktop themes', as
     await phone.goto('/login');
     await expect(phone.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await setTheme(phone, 'dark');
-    await capture(phone, 'auth-login-mobile');
+    await capture(phone, previewPrefix ? 'preview-login-mobile' : 'auth-login-mobile');
   } finally {
     await context.close();
   }
@@ -46,7 +47,7 @@ test.describe('empty dashboard captures', () => {
     await expect(page.getByTestId('empty-state')).toContainText('A fresh start');
     await setTheme(page, 'dark');
     await synced(page);
-    await capture(page, 'empty-dashboard-desktop');
+    await capture(page, previewPrefix + 'empty-dashboard-desktop');
 
     const context = await browser.newContext({
       ...asUser('B'), baseURL, viewport: mobile, isMobile: true, hasTouch: true,
@@ -57,7 +58,7 @@ test.describe('empty dashboard captures', () => {
       await open(phone, 'dashboard');
       await expect(phone.getByTestId('empty-state')).toContainText('A fresh start');
       await expect(phone.locator('html')).toHaveCSS('color-scheme', 'dark');
-      await capture(phone, 'empty-dashboard-mobile');
+      await capture(phone, previewPrefix + 'empty-dashboard-mobile');
     } finally {
       await context.close();
     }
