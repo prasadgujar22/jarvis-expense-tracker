@@ -106,7 +106,7 @@ export function validGoal(v: unknown): Goal | null {
   };
 }
 
-export const DEFAULT_SETTINGS: Settings = { currency: 'INR', theme: 'dark', name: 'Aarav', lastAccountId: null };
+export const DEFAULT_SETTINGS: Settings = { currency: 'INR', theme: 'dark', name: '', lastAccountId: null, onboarded: false };
 
 export function validSettings(v: unknown): Settings {
   if (!isObj(v)) return { ...DEFAULT_SETTINGS };
@@ -115,6 +115,7 @@ export function validSettings(v: unknown): Settings {
     theme: oneOf(v.theme, ['dark', 'light', 'system'] as const) ?? 'dark',
     name: typeof v.name === 'string' ? v.name.slice(0, 40) : DEFAULT_SETTINGS.name,
     lastAccountId: nullableStr(v.lastAccountId),
+    onboarded: v.onboarded === true,
   };
 }
 

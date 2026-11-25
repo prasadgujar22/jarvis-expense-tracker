@@ -1,23 +1,23 @@
 import type { DataState, Settings } from './types';
 import { DEFAULT_SETTINGS, validAccount, validBudget, validCategory, validGoal, validList, validRecurring, validSettings, validTransaction } from './validate';
-import { DEFAULT_CATEGORIES } from '../data/categories';
 
-export const PREFIX = 'kosh:v1:';
-export const KEYS = {
-  meta: PREFIX + 'meta',
-  settings: PREFIX + 'settings',
-  categories: PREFIX + 'categories',
-  accounts: PREFIX + 'accounts',
-  transactions: PREFIX + 'transactions',
-  budgets: PREFIX + 'budgets',
-  recurring: PREFIX + 'recurring',
-  goals: PREFIX + 'goals',
-} as const;
-
-type SliceKey = keyof DataState;
+export type SliceKey = keyof DataState;
 export const SLICES: SliceKey[] = ['categories', 'accounts', 'transactions', 'budgets', 'recurring', 'goals'];
 
-function readJSON(key: string): unknown {
+const VALIDATORS: { [K in SliceKey]: (v: unknown) => DataState[K][number] | null } = {
+  categories: validCategory,
+  accounts: validAccount,
+  transactions: validTransaction,
+  budgets: validBudget,
+  recurring: validRecurring,
+  goals: validGoal,
+};
+
+export function validSlice<K extends SliceKey>(slice: K, v: unknown): DataState[K] | null {
+  return validList(v, VALIDATORS[slice] as (x: unknown) => DataState[K][number] | null) as DataState[K] | null;
+}
+
+export function readJSON(key: string): unknown {
   try {
     const raw = localStorage.getItem(key);
     return raw === null ? undefined : (JSON.parse(raw) as unknown);
@@ -36,7 +36,7 @@ export function writeJSON(key: string, value: unknown): boolean {
   }
 }
 
-function parseRaw(raw: string | null): unknown {
+export function parseRaw(raw: string | null): unknown {
   if (raw === null) return undefined;
   try {
     return JSON.parse(raw) as unknown;
@@ -45,68 +45,84 @@ function parseRaw(raw: string | null): unknown {
   }
 }
 
-export type RemoteChange =
-  | { kind: 'settings'; value: Settings }
-  | { kind: 'slice'; slice: SliceKey; value: DataState[SliceKey] };
-
-/** Validate a value another tab wrote, for a storage 'storage' event. Returns null if the key isn't ours or the value is unusable. */
-export function parseRemote(key: string | null, raw: string | null): RemoteChange | null {
-  if (!key || !key.startsWith(PREFIX)) return null;
-  const v = parseRaw(raw);
-  if (v === undefined) return null;
-  if (key === KEYS.settings) return { kind: 'settings', value: validSettings(v) };
-  switch (key) {
-    case KEYS.categories: {
-      const list = validList(v, validCategory);
-      return list && list.length > 0 ? { kind: 'slice', slice: 'categories', value: list } : null;
+export function removeKeysWithPrefix(prefix: string): void {
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) keys.push(k);
     }
-    case KEYS.accounts: {
-      const list = validList(v, validAccount);
-      return list ? { kind: 'slice', slice: 'accounts', value: list } : null;
-    }
-    case KEYS.transactions: {
-      const list = validList(v, validTransaction);
-      return list ? { kind: 'slice', slice: 'transactions', value: list } : null;
-    }
-    case KEYS.budgets: {
-      const list = validList(v, validBudget);
-      return list ? { kind: 'slice', slice: 'budgets', value: list } : null;
-    }
-    case KEYS.recurring: {
-      const list = validList(v, validRecurring);
-      return list ? { kind: 'slice', slice: 'recurring', value: list } : null;
-    }
-    case KEYS.goals: {
-      const list = validList(v, validGoal);
-      return list ? { kind: 'slice', slice: 'goals', value: list } : null;
-    }
-    default:
-      return null;
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {
+    /* storage unavailable */
   }
 }
 
-export interface Loaded {
-  initialized: boolean;
+/** Device-level theme preference, used before sign-in and for the pre-paint script in index.html. */
+export const DEVICE_THEME_KEY = 'kosh:theme';
+
+// ---------------------------------------------------------------------------------------------
+// v2: per-user cache  kosh:v2:<userId>:<slice|settings|queue|meta>
+// ---------------------------------------------------------------------------------------------
+export const v2Prefix = (userId: string) => 'kosh:v2:' + userId + ':';
+export const v2Key = (userId: string, name: SliceKey | 'settings' | 'queue' | 'meta') => v2Prefix(userId) + name;
+
+export interface CachedState {
   data: DataState;
   settings: Settings;
 }
 
-export function loadAll(): Loaded {
-  const meta = readJSON(KEYS.meta);
-  const initialized = typeof meta === 'object' && meta !== null && (meta as { initialized?: unknown }).initialized === true;
-  const settings = validSettings(readJSON(KEYS.settings) ?? DEFAULT_SETTINGS);
-  const categories = validList(readJSON(KEYS.categories), validCategory);
-  const data: DataState = {
-    categories: categories && categories.length > 0 ? categories : DEFAULT_CATEGORIES.map((c) => ({ ...c })),
-    accounts: validList(readJSON(KEYS.accounts), validAccount) ?? [],
-    transactions: validList(readJSON(KEYS.transactions), validTransaction) ?? [],
-    budgets: validList(readJSON(KEYS.budgets), validBudget) ?? [],
-    recurring: validList(readJSON(KEYS.recurring), validRecurring) ?? [],
-    goals: validList(readJSON(KEYS.goals), validGoal) ?? [],
-  };
-  return { initialized, data, settings };
+export function loadUserCache(userId: string): CachedState | null {
+  const meta = readJSON(v2Key(userId, 'meta'));
+  if (typeof meta !== 'object' || meta === null || (meta as { cached?: unknown }).cached !== true) return null;
+  const data = {} as DataState;
+  for (const s of SLICES) (data as Record<SliceKey, unknown>)[s] = validSlice(s, readJSON(v2Key(userId, s))) ?? [];
+  return { data, settings: validSettings(readJSON(v2Key(userId, 'settings')) ?? DEFAULT_SETTINGS) };
 }
 
-export function saveMeta(): boolean {
-  return writeJSON(KEYS.meta, { initialized: true, schema: 1, updatedAt: new Date().toISOString() });
+export function saveUserCacheMeta(userId: string): boolean {
+  return writeJSON(v2Key(userId, 'meta'), { cached: true, schema: 2, savedAt: new Date().toISOString() });
+}
+
+export function clearUserCache(userId: string): void {
+  removeKeysWithPrefix(v2Prefix(userId));
+}
+
+// ---------------------------------------------------------------------------------------------
+// v1: legacy single-device data (before accounts). Only read to offer a one-time import.
+// ---------------------------------------------------------------------------------------------
+export const V1_PREFIX = 'kosh:v1:';
+const V1 = (name: string) => V1_PREFIX + name;
+
+export interface LegacyData {
+  data: DataState;
+  settings: Settings;
+  counts: { transactions: number; accounts: number; budgets: number; recurring: number; goals: number };
+}
+
+export function hasLegacyData(): boolean {
+  try {
+    for (let i = 0; i < localStorage.length; i++) if (localStorage.key(i)?.startsWith(V1_PREFIX)) return true;
+  } catch {
+    /* storage unavailable */
+  }
+  return false;
+}
+
+/** Reads kosh:v1:* (validated). Returns null when there is nothing worth importing. */
+export function loadLegacyData(): LegacyData | null {
+  if (!hasLegacyData()) return null;
+  const data = {} as DataState;
+  for (const s of SLICES) (data as Record<SliceKey, unknown>)[s] = validSlice(s, readJSON(V1(s))) ?? [];
+  const settings = validSettings(readJSON(V1('settings')) ?? DEFAULT_SETTINGS);
+  const counts = {
+    transactions: data.transactions.length, accounts: data.accounts.length, budgets: data.budgets.length,
+    recurring: data.recurring.length, goals: data.goals.length,
+  };
+  const anything = counts.transactions + counts.accounts + counts.budgets + counts.recurring + counts.goals + data.categories.length > 0;
+  return anything ? { data, settings, counts } : null;
+}
+
+export function clearLegacyData(): void {
+  removeKeysWithPrefix(V1_PREFIX);
 }
