@@ -94,6 +94,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   /* clip, not hidden: hidden makes html/body scroll containers and breaks position: sticky (sidebar, top bar). */
+  overflow-x: hidden; /* fallback for browsers without clip (Safari < 16) */
   overflow-x: clip;
 }
 body {
