@@ -5,6 +5,7 @@ import type { DataState, Settings } from '../store/types';
 import { DEFAULT_SETTINGS } from '../store/validate';
 import { clearUserCache, loadUserCache, parseRaw, readJSON, saveUserCacheMeta, v2Key, v2Prefix, validSlice, writeJSON } from '../store/persist';
 import { validSettings } from '../store/validate';
+import { takeExplicitRestore, clearExplicitRestores } from './explicit';
 import { ALL_TABLES, FROM_ROW, SLICES, SLICE_OF, TABLES, settingsFromRow, settingsToRow, toRow, type DataTable, type Row, type SliceKey, type Table } from './rows';
 
 // ---------------------------------------------------------------------------------------------
@@ -134,7 +135,7 @@ function diffSlice(slice: SliceKey, prev: { id: string }[], next: { id: string }
     if (old === item) continue;
     // Auto-posted recurring occurrences have deterministic ids: insert them only if no device posted them yet.
     if (!old && isDeterministic(slice, item.id)) {
-      if (recentlyDeleted.delete(item.id)) ops.push({ table, id: item.id, kind: 'upsert', untomb: true, row: toRow(slice, item as never) });
+      if (recentlyDeleted.delete(item.id) || takeExplicitRestore(item.id)) ops.push({ table, id: item.id, kind: 'upsert', untomb: true, row: toRow(slice, item as never) });
       else ops.push({ table, id: item.id, kind: 'insert', row: toRow(slice, item as never) });
       continue;
     }
@@ -218,8 +219,9 @@ function isNetworkError(e: unknown): boolean {
 }
 /** The row itself is unacceptable (check/not-null/type/length violation): retrying can never succeed. */
 function isDataError(e: unknown): boolean {
-  const c = errCode(e);
-  return /^2[23]/.test(c) || c === 'PGRST204' || c === '42703';
+  // Only row-level violations (22xxx data exceptions, 23xxx integrity/check). Schema mismatches such as PGRST204 or
+  // 42703 mean client and database disagree: keep the queue and surface an error instead of discarding changes.
+  return /^2[23]/.test(errCode(e));
 }
 /** The deleted_ids table hasn't been created yet (migration not applied). */
 function isMissingTable(e: unknown): boolean {
@@ -261,6 +263,13 @@ function scheduleFlush(delay: number) {
   flushTimer = window.setTimeout(() => void flush(), delay);
 }
 
+let pullRetryTimer: number | undefined;
+function schedulePullRetry() {
+  window.clearTimeout(pullRetryTimer);
+  pullRetryTimer = window.setTimeout(() => void pull(), retryDelay);
+  retryDelay = Math.min(retryDelay * 2, 60_000);
+}
+
 function scheduleRetry() {
   window.clearTimeout(retryTimer);
   retryTimer = window.setTimeout(() => void flush(), retryDelay);
@@ -268,6 +277,8 @@ function scheduleRetry() {
 }
 
 const CHUNK = 400;
+/** Filters that put ids in the query string (deletes, tombstone lookups) stay well under URL limits. */
+const TOMB_CHUNK = 100;
 function chunks<T>(list: T[], n: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < list.length; i += n) out.push(list.slice(i, i + n));
@@ -340,11 +351,12 @@ async function sendOps(ops: Op[]): Promise<void> {
       if (table === 'transactions') {
         const det = part.filter((o) => o.id.startsWith('rec:'));
         if (kind === 'insert' && det.length) {
-          // Never auto-post an occurrence the user deleted on any device.
-          const dead = await tombstoneCall(() =>
-            db.from('deleted_ids').select('id').eq('user_id', userId).eq('table_name', 'transactions').in('id', det.map((o) => o.id)),
-          );
-          const deadIds = new Set(((dead ?? []) as { id: string }[]).map((r) => r.id));
+          // Never auto-post an occurrence the user deleted on any device. Ids go in the URL: keep batches small.
+          const deadIds = new Set<string>();
+          for (const ids of chunks(det.map((o) => o.id), TOMB_CHUNK)) {
+            const dead = await tombstoneCall(() => db.from('deleted_ids').select('id').eq('user_id', userId).eq('table_name', 'transactions').in('id', ids));
+            for (const r of (dead ?? []) as { id: string }[]) deadIds.add(r.id);
+          }
           if (deadIds.size) {
             const skipped = part.filter((o) => deadIds.has(o.id));
             part = part.filter((o) => !deadIds.has(o.id));
@@ -358,8 +370,8 @@ async function sendOps(ops: Op[]): Promise<void> {
           );
         } else if (kind === 'upsert') {
           const revived = det.filter((o) => o.untomb);
-          if (revived.length) {
-            await tombstoneCall(() => db.from('deleted_ids').delete().eq('user_id', userId).eq('table_name', 'transactions').in('id', revived.map((o) => o.id)));
+          for (const ids of chunks(revived.map((o) => o.id), TOMB_CHUNK)) {
+            await tombstoneCall(() => db.from('deleted_ids').delete().eq('user_id', userId).eq('table_name', 'transactions').in('id', ids));
           }
         }
       }
@@ -475,8 +487,11 @@ export function pull(): Promise<boolean> {
       return await crossTabLock(() => pullLocked(startUid));
     } catch (e) {
       if (uid !== startUid) return false;
-      if (isNetworkError(e)) setStatus('offline');
-      else setStatus('error', friendlySyncError(e));
+      if (isNetworkError(e)) {
+        // A stalled/dropped request while the browser is online won't fire 'online' later: retry on a timer.
+        setStatus(online() ? 'syncing' : 'offline');
+        if (online()) schedulePullRetry();
+      } else setStatus('error', friendlySyncError(e));
       return false;
     }
   }).then((ok) => {
@@ -508,6 +523,7 @@ async function pullLocked(startUid: string): Promise<boolean> {
   const merged = overlayQueue(data, remoteSettings, readQueue());
   applyRemote({ ...merged.data, settings: merged.settings });
   lastPull = Date.now();
+  retryDelay = 2000;
   useSync.setState({ phase: 'ready', fromServer: true });
   return true;
 }
@@ -621,6 +637,7 @@ export function stopSync({ clearCache }: { clearCache: boolean }): void {
   unsubscribeStore = null;
   window.clearTimeout(retryTimer);
   window.clearTimeout(flushTimer);
+  window.clearTimeout(pullRetryTimer);
   window.removeEventListener('online', onOnline);
   window.removeEventListener('offline', onOffline);
   window.removeEventListener('storage', onStorage);
@@ -634,6 +651,7 @@ export function stopSync({ clearCache }: { clearCache: boolean }): void {
   storageToastShown = false;
   tombstones = 'unknown';
   recentlyDeleted.clear();
+  clearExplicitRestores();
   if (clearCache && old) clearUserCache(old);
   applyRemote({ ...emptyData(), settings: { ...DEFAULT_SETTINGS, theme: deviceTheme() } });
   useSync.setState({ phase: 'idle', status: 'synced', pending: 0, error: null, userId: null, fromServer: false, rejected: 0 });
@@ -647,15 +665,16 @@ export function wipeAllData(): Promise<void> {
     const userId = uid;
     const db = client;
     await crossTabLock(async () => {
-      // Clear the shared queue first so no tab re-uploads rows after they are deleted; holding the lock means
-      // no other tab is mid-flush either.
-      writeQueue({});
-      recentlyDeleted.clear();
+      // Holding the lock means no tab can flush during the deletes. The queue is cleared only after every delete
+      // succeeded: if one fails, the user's pending changes are still there to upload.
       for (const t of ALL_TABLES) {
         const { error } = await db.from(t).delete().eq('user_id', userId);
         if (error) throw error;
       }
       await tombstoneCall(() => db.from('deleted_ids').delete().eq('user_id', userId));
+      writeQueue({});
+      recentlyDeleted.clear();
+      clearExplicitRestores();
     });
     const theme = useStore.getState().settings.theme;
     const name = useStore.getState().settings.name;

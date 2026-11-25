@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { startSync, stopSync, flush, pendingCount } from '../sync/sync';
+import { clearUserCache } from '../store/persist';
 
 export type AuthStatus = 'unconfigured' | 'loading' | 'signedOut' | 'signedIn';
 
@@ -88,6 +89,30 @@ function applySession(session: Session | null) {
   }
 }
 
+/**
+ * Explicit sign-out is announced to the user's other tabs, so they also delete the cache instead of treating their
+ * SIGNED_OUT (relayed by supabase-js) as a forced session end that keeps it.
+ */
+const authChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('kosh-auth') : null;
+let explicitResetTimer: number | undefined;
+if (authChannel) {
+  authChannel.onmessage = (e: MessageEvent) => {
+    const msg = e.data as { type?: string; userId?: string } | null;
+    if (!msg || msg.type !== 'signed-out' || !msg.userId) return;
+    const current = useAuth.getState().user;
+    if (current?.id === msg.userId) {
+      // Our SIGNED_OUT is still on its way: make it clear the cache. Forget the flag if it never arrives.
+      explicitSignOut = true;
+      window.clearTimeout(explicitResetTimer);
+      explicitResetTimer = window.setTimeout(() => (explicitSignOut = false), 10_000);
+    } else if (!current) {
+      // We already stopped (treated it as forced): delete what we kept, and anything we wrote before stopping.
+      clearUserCache(msg.userId);
+      if (useAuth.getState().notice?.text.startsWith('Your session ended')) setAuthNotice(null);
+    }
+  };
+}
+
 let initialised = false;
 export async function initAuth(): Promise<void> {
   if (initialised || !supabase) return;
@@ -125,6 +150,8 @@ export async function signOut(): Promise<void> {
   if (!supabase) return;
   if (pendingCount() > 0) await flush().catch(() => undefined);
   explicitSignOut = true;
+  const userId = useAuth.getState().user?.id;
+  if (userId) authChannel?.postMessage({ type: 'signed-out', userId });
   const { error } = await supabase.auth.signOut({ scope: 'local' });
   if (error) {
     // Offline (or the server refused): forget the session on this device anyway.

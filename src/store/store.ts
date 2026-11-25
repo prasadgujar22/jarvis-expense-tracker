@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { useMemo } from 'react';
 import type { Account, Backup, Budget, Category, DataState, Goal, GoalContribution, RecurringRule, Settings, Transaction } from './types';
 import { DEFAULT_SETTINGS } from './validate';
+import { markExplicitRestores } from '../sync/explicit';
 import { generateDue, occurrenceTxId, txFromRule } from './engine';
 import { todayISO, toISODate, type ISODate } from '../lib/dates';
 import { addDays, differenceInCalendarDays, parseISO } from 'date-fns';
@@ -221,6 +222,9 @@ export const useStore = create<Store>()((set, get) => ({
     return acc;
   },
   mergeData(data, settings) {
+    // Imported occurrences are the user's own records, not auto-posts: upload them even if once deleted.
+    const have = new Set(get().transactions.map((t) => t.id));
+    markExplicitRestores(data.transactions.map((t) => t.id).filter((id) => !have.has(id)));
     set((s) => {
       const merged: DataState = {
         categories: mergeById(s.categories, data.categories),
@@ -235,6 +239,9 @@ export const useStore = create<Store>()((set, get) => ({
     });
   },
   restoreBackup(b) {
+    // "Restore replaces all data": occurrences in the backup must come back even if they were deleted (tombstoned).
+    const have = new Set(get().transactions.map((t) => t.id));
+    markExplicitRestores(b.transactions.map((t) => t.id).filter((id) => !have.has(id)));
     set(() => ({
       ...generateDue({ categories: b.categories, accounts: b.accounts, transactions: b.transactions, budgets: b.budgets, recurring: b.recurring, goals: b.goals }, todayISO()),
       settings: { ...b.settings, onboarded: true },

@@ -18,8 +18,9 @@ export function friendlyAuthError(error: AuthError | Error | null | undefined): 
   if (code === 'over_request_rate_limit' || status === 429 || /rate limit|too many requests/i.test(msg)) return 'Too many attempts. Please wait a minute and try again.';
   if (code === 'weak_password' || /password should|weak password/i.test(msg)) return 'That password is too weak. Use at least 8 characters with letters and numbers.';
   if (code === 'same_password') return 'Choose a password different from your current one.';
-  if (code === 'signup_disabled' || /signups not allowed/i.test(msg)) return 'No account was found for this email. Create an account first.';
-  if (code === 'otp_disabled') return 'No account was found for this email. Create an account first.';
+  // signInWithOtp({ shouldCreateUser: false }) for an unknown address reports "Signups not allowed for otp".
+  if (code === 'otp_disabled' || /signups not allowed for otp/i.test(msg)) return 'No account was found for this email. Create an account first.';
+  if (code === 'signup_disabled' || /signups not allowed/i.test(msg)) return 'New sign-ups are closed right now. If you already have an account, sign in instead.';
   if (code === 'email_address_invalid' || /invalid.*email|email.*invalid/i.test(msg)) return 'That email address looks invalid.';
   if (code === 'session_not_found' || code === 'session_expired' || /auth session missing/i.test(msg)) return 'Your reset link has expired. Request a new one.';
   return msg || 'Something went wrong. Please try again.';
