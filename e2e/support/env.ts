@@ -17,7 +17,7 @@ function fromDotenv(): Record<string, string> {
 const dot = fromDotenv();
 const need = (k: string) => {
   const v = process.env[k] ?? dot[k];
-  if (!v) throw new Error('Missing ' + k + ' (load /workspace/expense-tracker-brief/e2e.env or set it in the environment)');
+  if (!v) throw new Error('Missing ' + k + ': set it in the environment or .env.local (test users: E2E_USER_{A,B}_{EMAIL,PASSWORD}; see README → Tests)');
   return v;
 };
 
