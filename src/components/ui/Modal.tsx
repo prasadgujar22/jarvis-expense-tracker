@@ -41,8 +41,9 @@ function ModalInner({ onClose, title, description, children, footer, size = 'md'
   useEffect(() => {
     openCount++;
     const prevFocus = document.activeElement as HTMLElement | null;
-    // Lock the viewport via <html>: overflow on <body> no longer propagates (html has overflow-x: clip),
-    // so it would make body a scroll container and break position: sticky while the dialog is open.
+    // Lock the viewport via <html>: overflow on <body> doesn't propagate to the viewport because html has a
+    // non-visible overflow-x (clip, or hidden as the fallback), so it would make body a scroll container and
+    // break position: sticky while the dialog is open. Keep html's overflow-x non-visible for this to hold.
     const html = document.documentElement;
     if (openCount === 1) {
       savedOverflow = html.style.overflow;
