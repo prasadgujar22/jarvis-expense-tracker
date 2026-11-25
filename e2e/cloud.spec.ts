@@ -508,6 +508,7 @@ test('a row the server rejects is set aside and does not block later changes', a
 
 test('a deleted auto-posted occurrence is not re-posted by a device with a stale rule (tombstones)', async ({ page, context, browser }, info) => {
   const tomb = await tombstoneBackend('A');
+  test.info().annotations.push({ type: 'tombstones', description: tomb.real ? 'real deleted_ids table' : 'mocked (migration not applied)' });
   await tomb.attach(context);
   const { db, userId } = apiAs('A');
   const { error } = await db.from('recurring_rules').insert({
@@ -526,7 +527,7 @@ test('a deleted auto-posted occurrence is not re-posted by a device with a stale
 
   // Undo of a deleted occurrence is an explicit re-create: it removes the tombstone and syncs.
   await page.locator('[data-tx-id="rec:rec_qa_tomb:2026-11-01"]').getByTestId('transaction-delete').click();
-  await page.getByTestId('toast-action').click();
+  await page.getByTestId('toast-action').last().click();
   await expect(row(page, 'QA Tomb rent')).toHaveCount(2);
   await synced(page);
   expect(await tomb.ids()).not.toContain('rec:rec_qa_tomb:2026-11-01');
@@ -593,7 +594,9 @@ test('row-level security: user B sees none of user A\'s data (UI and REST)', asy
   }
   const { db } = apiAs('B');
   const { userId: aId } = apiAs('A');
-  for (const t of ['transactions', 'accounts', 'recurring_rules', 'budgets', 'goals'] as const) {
+  const tables = ['transactions', 'accounts', 'recurring_rules', 'budgets', 'goals'] as string[];
+  if ((await tombstoneBackend('A')).real) tables.push('deleted_ids');
+  for (const t of tables) {
     const { data, error } = await db.from(t).select('*');
     expect(error).toBeNull();
     expect(data, t).toEqual([]);
