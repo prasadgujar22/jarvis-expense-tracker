@@ -24,7 +24,7 @@ export function Sidebar() {
         Add transaction
         <kbd className="ml-auto rounded-md bg-black/10 px-1.5 py-0.5 text-[10px] font-semibold">N</kbd>
       </Button>
-      <nav aria-label="Main" className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1 scrollbar-none">
+      <nav aria-label="Main" className="-mx-1 -my-1 min-h-0 flex-1 overflow-y-auto px-1 py-1 scrollbar-none">
         <ul className="space-y-0.5">
           {NAV.map((item) => {
             const active = path === item.path;
