@@ -44,6 +44,35 @@ test('desktop sidebar stays pinned with the user card at the bottom while the pa
   expect(widths[0]).toBeLessThanOrEqual(widths[1]);
 });
 
+test('desktop sidebar stays pinned while Quick Add is open and the page is scrolled', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 600 });
+  await open(page, 'dashboard');
+  await page.evaluate(() => {
+    document.getElementById('main')!.style.minHeight = window.innerHeight * 3 + 'px';
+    window.scrollTo(0, window.innerHeight);
+  });
+
+  await page.getByTestId('quick-add-button').click();
+  await expect(page.getByTestId('quick-add-modal')).toBeVisible();
+  const before = await page.evaluate(() => window.scrollY);
+  await page.mouse.move(512, 300);
+  await page.mouse.wheel(0, 1200);
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => window.scrollY), 'background page is scroll-locked').toBe(before);
+  // body must not have become a scroll container of its own
+  expect(await page.evaluate(() => document.body.scrollTop)).toBe(0);
+
+  const asideBox = (await page.getByRole('complementary', { name: 'Sidebar' }).boundingBox())!;
+  expect(asideBox.y).toBeCloseTo(0, 0);
+  expect(asideBox.height).toBeCloseTo(600, 0);
+  const box = (await page.getByTestId('sidebar-user').boundingBox())!;
+  expect(600 - (box.y + box.height)).toBeLessThanOrEqual(28);
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('quick-add-modal')).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.style.overflow)).toBe('');
+});
+
 test('at 390px the desktop sidebar is hidden and the bottom nav shows', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await open(page, 'dashboard');

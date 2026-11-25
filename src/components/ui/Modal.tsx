@@ -39,8 +39,11 @@ function ModalInner({ onClose, title, description, children, footer, size = 'md'
   useEffect(() => {
     openCount++;
     const prevFocus = document.activeElement as HTMLElement | null;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    // Lock the viewport via <html>: overflow on <body> no longer propagates (html has overflow-x: clip),
+    // so it would make body a scroll container and break position: sticky while the dialog is open.
+    const root = document.documentElement;
+    const prevOverflow = root.style.overflow;
+    root.style.overflow = 'hidden';
     // Focus synchronously on mount; never steal focus from an element the user (or a test)
     // has already focused inside the dialog — a delayed focus can hijack in-progress typing.
     const focusInitial = () => {
@@ -80,7 +83,7 @@ function ModalInner({ onClose, title, description, children, footer, size = 'md'
       openCount--;
       window.clearTimeout(t);
       document.removeEventListener('keydown', onKey, true);
-      if (openCount === 0) document.body.style.overflow = prevOverflow;
+      if (openCount === 0) root.style.overflow = prevOverflow;
       prevFocus?.focus?.();
     };
   }, [initialFocusRef]);
