@@ -1,7 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { AUTH_DIR, BASE_URL, SUPABASE_KEY, SUPABASE_URL, USERS, stateFile, tokenFile, type UserKey } from './support/env';
-import { retry, wipe } from './support/api';
+import { TABLES, retry, wipe } from './support/api';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+/** Rows left per table after a wipe (should be none). */
+async function leftovers(db: SupabaseClient, userId: string): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const t of [...TABLES, 'deleted_ids']) {
+    const { count, error } = await retry('count ' + t, async () => {
+      const r = await db.from(t).select('*', { count: 'exact', head: true }).eq('user_id', userId);
+      if (r.error && r.error.code !== 'PGRST205') throw new Error(r.error.message);
+      return r;
+    });
+    if (!error && count) out[t] = count;
+  }
+  return out;
+}
 import { DEFAULT_CATEGORIES } from '../src/data/categories';
 
 /**
@@ -31,6 +46,14 @@ export default async function globalSetup() {
     if (error || !data.session) throw new Error('Sign-in failed for test user ' + key + ': ' + (error?.message ?? 'no session'));
     const userId = data.user.id;
     await wipe(client, userId);
+    // A request still in flight from a previous run can land after the wipe: verify, and wipe once more if needed.
+    let left = await leftovers(client, userId);
+    if (Object.keys(left).length) {
+      await new Promise((r) => setTimeout(r, 3000));
+      await wipe(client, userId);
+      left = await leftovers(client, userId);
+    }
+    if (Object.keys(left).length) throw new Error('Could not empty test user ' + key + ': ' + JSON.stringify(left));
     if (key === 'B') {
       const { error: e1 } = await client.from('settings').upsert({ user_id: userId, name: 'QA Bee', currency: 'INR', theme: 'dark', onboarded: true });
       if (e1) throw new Error(e1.message);

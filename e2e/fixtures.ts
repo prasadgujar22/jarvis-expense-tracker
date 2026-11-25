@@ -86,8 +86,15 @@ export async function navigate(page: Page, route: Route, mobile: boolean) {
 /** Wait until every local change has reached Supabase. */
 export async function synced(page: Page) {
   const pill = page.getByTestId('sync-status');
-  await expect(pill).toHaveAttribute('data-state', 'synced', { timeout: 20_000 });
-  await expect(pill).toHaveAttribute('data-pending', '0');
+  try {
+    await expect(pill).toHaveAttribute('data-state', 'synced', { timeout: 20_000 });
+    await expect(pill).toHaveAttribute('data-pending', '0');
+  } catch (e) {
+    const queue = await page
+      .evaluate(() => Object.entries(localStorage).filter(([k]) => k.endsWith(':queue')).map(([k, v]) => k.split(':').slice(-1)[0] + '=' + v))
+      .catch(() => []);
+    throw new Error('Not synced; queue: ' + JSON.stringify(queue) + '\n' + (e as Error).message);
+  }
 }
 
 /** Cycle the theme toggle until the wanted theme is active (theme is part of the synced settings). */
