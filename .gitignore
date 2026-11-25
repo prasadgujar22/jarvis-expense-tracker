@@ -10,3 +10,4 @@ playwright-report
 .env*
 .env*.local
 .env.e2e
+e2e/.auth

@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react';
+import { navigate } from '../../router';
 import { AnimatePresence, motion } from 'motion/react';
 import { format, parseISO, differenceInCalendarDays } from 'date-fns';
 import { CalendarClock, Check, Pencil, Plus, Repeat, SkipForward, Trash2 } from 'lucide-react';
@@ -72,7 +73,7 @@ export default function RecurringPage() {
 
       {rules.length === 0 ? (
         <Card>
-          <EmptyState icon={Repeat} title="Nothing recurring yet" description="Add rent, salary, Netflix and other repeating payments. Kosh posts them automatically or reminds you." action={accounts.length > 0 ? <Button variant="primary" onClick={() => edit(null)}>Add recurring</Button> : undefined} />
+          <EmptyState icon={Repeat} title="Nothing recurring yet" description="Add rent, salary, Netflix and other repeating payments. Kosh posts them automatically or reminds you." action={accounts.length > 0 ? <Button variant="primary" onClick={() => edit(null)}>Add recurring</Button> : <Button variant="primary" onClick={() => navigate('/accounts')} data-testid="recurring-add-account">Add an account first</Button>} />
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">

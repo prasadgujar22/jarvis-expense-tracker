@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { useUI } from '../../store/ui';
+import { Button } from '../../components/ui/Button';
 import { motion } from 'motion/react';
 import { format, parseISO, subDays } from 'date-fns';
 import { ArrowDownRight, ArrowUpRight, Lightbulb, Minus, TrendingDown, TrendingUp, Sparkles, CalendarRange, Repeat, PiggyBank } from 'lucide-react';
@@ -98,7 +100,7 @@ export default function InsightsPage() {
     return (
       <div>
         <PageHeader title="Insights" />
-        <Card><EmptyState icon={Lightbulb} title="Insights need a little history" description="Add a few expenses and Kosh will start spotting patterns for you." /></Card>
+        <Card><EmptyState icon={Lightbulb} title="Insights need a little history" description="Add a few expenses and Kosh will start spotting patterns for you." action={<Button variant="primary" onClick={() => useUI.getState().openQuickAdd({ type: 'expense' })}>Add an expense</Button>} /></Card>
       </div>
     );
   }
