@@ -55,7 +55,13 @@ export async function newUserContext(browser: Browser, info: TestInfo, user: Use
 }
 
 export async function ready(page: Page, route: Route) {
-  await expect(page.getByRole('heading', { level: 1, name: routes[route].heading })).toBeVisible({ timeout: 20_000 });
+  const heading = page.getByRole('heading', { level: 1, name: routes[route].heading });
+  try {
+    await expect(heading).toBeVisible({ timeout: 20_000 });
+  } catch (e) {
+    const splash = await page.getByTestId('splash').getAttribute('data-reason', { timeout: 500 }).catch(() => null);
+    throw new Error('Page not ready (' + page.url() + ', splash=' + splash + '): ' + (e as Error).message);
+  }
 }
 
 export async function open(page: Page, route: Route) {

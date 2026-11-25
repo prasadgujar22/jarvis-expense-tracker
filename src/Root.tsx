@@ -76,15 +76,15 @@ export default function Root() {
 
   let view: React.ReactNode;
   if (status === 'unconfigured') view = <ConfigError />;
-  else if (status === 'loading') view = <Splash />;
+  else if (status === 'loading') view = <Splash reason="auth" />;
   else if (status === 'signedOut') view = <AuthScreen key={path} initialMode={path === '/reset-password' ? 'forgot' : 'signin'} />;
   else if (recovery) view = <ResetPasswordScreen />;
-  else if (path === '/login' || path === '/reset-password') view = <Splash />;
-  else if (phase === 'loading' || phase === 'idle') view = <Splash label="Loading your data" />;
+  else if (path === '/login' || path === '/reset-password') view = <Splash reason="redirect" />;
+  else if (phase === 'loading' || phase === 'idle') view = <Splash label="Loading your data" reason="data" />;
   else if (phase === 'failed') view = <LoadError message={syncError} onRetry={retryInitialLoad} onSignOut={() => void signOut()} />;
   else view = (
     <>
-      <Suspense fallback={<Splash />}>{onboarded ? <App /> : <Onboarding />}</Suspense>
+      <Suspense fallback={<Splash reason="chunk" />}>{onboarded ? <App /> : <Onboarding />}</Suspense>
       <LegacyImport />
     </>
   );

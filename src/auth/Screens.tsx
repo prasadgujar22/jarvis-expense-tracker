@@ -4,9 +4,9 @@ import { Button } from '../components/ui/Button';
 import { BrandMark } from './AuthLayout';
 
 /** Full-screen splash while the session (or the first data load) resolves. */
-export function Splash({ label = 'Loading Kosh' }: { label?: string }) {
+export function Splash({ label = 'Loading Kosh', reason }: { label?: string; reason?: string }) {
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-6" role="status" aria-live="polite" data-testid="splash">
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-6" role="status" aria-live="polite" data-testid="splash" data-reason={reason}>
       <motion.div initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.35, ease: 'easeOut' }} className="relative">
         <div className="absolute inset-0 -m-6 animate-pulse rounded-full bg-accent-soft blur-2xl" aria-hidden />
         <BrandMark size={64} />
