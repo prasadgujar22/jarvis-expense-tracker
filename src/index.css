@@ -93,8 +93,12 @@ body {
   font-feature-settings: 'cv11', 'ss01';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* clip, not hidden: hidden makes html/body scroll containers and breaks position: sticky (sidebar, top bar). */
-  overflow-x: hidden; /* fallback for browsers without clip (Safari < 16) */
+  /* clip, not hidden: hidden on body makes it a scroll container and breaks position: sticky (sidebar, top bar). */
+  overflow-x: clip;
+}
+html {
+  /* html's overflow always goes to the viewport, so hidden is a safe fallback here (Safari < 16); body stays visible there. */
+  overflow-x: hidden;
   overflow-x: clip;
 }
 body {
