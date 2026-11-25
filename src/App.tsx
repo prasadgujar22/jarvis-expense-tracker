@@ -6,7 +6,6 @@ import { BottomNav } from './components/layout/BottomNav';
 import { Toaster } from './components/ui/Toaster';
 import { CommandPalette } from './components/CommandPalette';
 import { QuickAdd } from './features/transactions/QuickAdd';
-import { useApplyTheme } from './components/layout/useTheme';
 import { matchRoute, usePath, type RoutePath } from './router';
 import { useUI } from './store/ui';
 import { isModalOpen } from './components/ui/Modal';
@@ -65,7 +64,6 @@ function PageFallback() {
 }
 
 export default function App() {
-  useApplyTheme();
   useShortcuts();
   const path = usePath();
   const route = matchRoute(path);

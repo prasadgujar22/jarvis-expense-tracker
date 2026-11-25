@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { Database, Download, FileJson, FileUp, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-react';
+import { Database, Download, FileJson, FileUp, Loader2, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { Card, CardHeader } from '../../components/ui/Card';
 import { Button, IconButton } from '../../components/ui/Button';
@@ -21,6 +21,8 @@ import { todayISO } from '../../lib/dates';
 import { validBackup } from '../../store/validate';
 import { CsvImport } from './CsvImport';
 import { cn } from '../../lib/cn';
+import { AccountPanel } from '../../auth/UserCard';
+import { wipeAllData } from '../../sync/sync';
 
 export default function SettingsPage() {
   const settings = useStore((s) => s.settings);
@@ -28,7 +30,11 @@ export default function SettingsPage() {
   const ids = { name: useFieldId('sn'), cur: useFieldId('sc') };
   return (
     <div className="space-y-6">
-      <PageHeader title="Settings" subtitle="Preferences, categories and your data" />
+      <PageHeader title="Settings" subtitle="Your account, preferences, categories and data" />
+      <Card aria-labelledby="acct-h">
+        <CardHeader id="acct-h" title="Account" subtitle="Signed in — your data syncs to this account" />
+        <AccountPanel />
+      </Card>
       <Card aria-labelledby="pref-h">
         <CardHeader id="pref-h" title="Preferences" />
         <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-3">
@@ -53,7 +59,7 @@ export default function SettingsPage() {
       </Card>
       <CategoriesCard />
       <DataCard />
-      <p className="pb-4 text-center text-xs text-subtle">Kosh v1.0 · Every rupee, accounted for. · Data stored locally on this device.</p>
+      <p className="pb-4 text-center text-xs text-subtle">Kosh v2.0 · Every rupee, accounted for. · Synced securely to your account.</p>
     </div>
   );
 }
@@ -147,13 +153,11 @@ function DataCard() {
   const txs = useStore((s) => s.transactions);
   const exportBackup = useStore((s) => s.exportBackup);
   const restoreBackup = useStore((s) => s.restoreBackup);
-  const resetDemo = useStore((s) => s.resetDemo);
-  const clearAll = useStore((s) => s.clearAll);
   const cats = useCategoryMap();
   const accs = useAccountMap();
   const toast = useUI((s) => s.toast);
   const [importOpen, setImportOpen] = useState(false);
-  const [confirm, setConfirm] = useState<'reset' | 'clear' | null>(null);
+  const [clearOpen, setClearOpen] = useState(false);
   const [pendingRestore, setPendingRestore] = useState<ReturnType<typeof validBackup>>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
 
@@ -183,13 +187,12 @@ function DataCard() {
         </>
       ),
     },
-    { icon: RotateCcw, title: 'Reset to demo data', desc: 'Replace everything with fresh sample data ending today.', action: <Button size="sm" onClick={() => setConfirm('reset')} data-testid="reset-demo">Reset</Button> },
-    { icon: Trash2, title: 'Clear all data', desc: 'Delete every account, transaction, budget and goal on this device.', action: <Button size="sm" variant="danger" onClick={() => setConfirm('clear')} data-testid="clear-all">Clear</Button>, danger: true },
+    { icon: Trash2, title: 'Clear all data', desc: 'Permanently delete every account, transaction, budget, goal and setting from your cloud account.', action: <Button size="sm" variant="danger" onClick={() => setClearOpen(true)} data-testid="clear-all">Clear</Button>, danger: true },
   ];
 
   return (
     <Card aria-labelledby="data-h">
-      <CardHeader id="data-h" title="Your data" subtitle="Stored only in this browser. Back it up regularly." action={<Database className="h-5 w-5 text-subtle" aria-hidden />} />
+      <CardHeader id="data-h" title="Your data" subtitle="Synced to your account and cached on this device for offline use." action={<Database className="h-5 w-5 text-subtle" aria-hidden />} />
       <ul className="divide-y divide-line p-2">
         {rows.map((r) => (
           <li key={r.title} className="flex items-center gap-3 px-3 py-3">
@@ -205,9 +208,63 @@ function DataCard() {
       <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import CSV" description="Supports Kosh exports and simple bank CSVs (date, amount, description, category)." size="lg" testId="csv-import-modal">
         <CsvImport onDone={() => setImportOpen(false)} />
       </Modal>
-      <ConfirmDialog open={confirm === 'reset'} onClose={() => setConfirm(null)} title="Reset to demo data?" description="All your current data will be replaced with sample data. This can't be undone." confirmLabel="Reset" onConfirm={() => { resetDemo(); toast({ message: 'Demo data restored', tone: 'success' }); }} />
-      <ConfirmDialog open={confirm === 'clear'} onClose={() => setConfirm(null)} title="Clear all data?" description="This permanently deletes all accounts, transactions, budgets, recurring rules and goals from this device." confirmLabel="Clear everything" onConfirm={() => { clearAll(); toast({ message: 'All data cleared' }); }} />
-      <ConfirmDialog open={!!pendingRestore} onClose={() => setPendingRestore(null)} title="Restore backup?" description={pendingRestore ? 'Replace current data with ' + pendingRestore.transactions.length + ' transactions and ' + pendingRestore.accounts.length + ' accounts from the backup.' : ''} confirmLabel="Restore" danger={false} onConfirm={() => { if (pendingRestore) { restoreBackup(pendingRestore); toast({ message: 'Backup restored', tone: 'success' }); } }} />
+      <ClearAllDialog open={clearOpen} onClose={() => setClearOpen(false)} />
+      <ConfirmDialog open={!!pendingRestore} onClose={() => setPendingRestore(null)} title="Restore backup?" description={pendingRestore ? 'Replace all data in your account with ' + pendingRestore.transactions.length + ' transactions and ' + pendingRestore.accounts.length + ' accounts from the backup.' : ''} confirmLabel="Restore" danger={false} onConfirm={() => { if (pendingRestore) { restoreBackup(pendingRestore); toast({ message: 'Backup restored', tone: 'success' }); } }} />
     </Card>
+  );
+}
+
+const CLEAR_PHRASE = 'DELETE';
+
+/** Typed confirmation, then deletes the user's rows in every table (RLS-scoped) and restarts onboarding. */
+function ClearAllDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toast = useUI((s) => s.toast);
+  const id = useFieldId('clr');
+  const close = () => {
+    if (busy) return;
+    setText('');
+    setError(null);
+    onClose();
+  };
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await wipeAllData();
+      setBusy(false);
+      setText('');
+      onClose();
+      toast({ message: 'All data cleared' });
+    } catch (e) {
+      setBusy(false);
+      setError(e instanceof Error ? e.message : 'Could not clear data. Try again.');
+    }
+  };
+  return (
+    <Modal
+      open={open}
+      onClose={close}
+      title="Clear all data?"
+      description="This permanently deletes all accounts, transactions, budgets, recurring rules, goals, categories and settings from your account on every device. It can't be undone."
+      size="sm"
+      testId="clear-dialog"
+      footer={
+        <>
+          <Button variant="ghost" onClick={close} disabled={busy}>Cancel</Button>
+          <Button variant="danger" onClick={() => void run()} disabled={text !== CLEAR_PHRASE || busy} data-testid="confirm-dialog-confirm">
+            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+            Clear everything
+          </Button>
+        </>
+      }
+    >
+      <Field label={<>Type <span className="font-mono font-semibold text-fg">{CLEAR_PHRASE}</span> to confirm</>} htmlFor={id}>
+        <Input id={id} value={text} onChange={(e) => setText(e.target.value)} autoComplete="off" data-autofocus data-testid="clear-confirm-input" />
+      </Field>
+      {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+    </Modal>
   );
 }
