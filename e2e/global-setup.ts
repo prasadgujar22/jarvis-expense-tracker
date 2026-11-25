@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { AUTH_DIR, BASE_URL, SUPABASE_KEY, SUPABASE_URL, USERS, stateFile, tokenFile, type UserKey } from './support/env';
-import { wipe } from './support/api';
+import { retry, wipe } from './support/api';
 import { DEFAULT_CATEGORIES } from '../src/data/categories';
 
 /**
@@ -23,14 +23,18 @@ export default async function globalSetup() {
         storage: { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => void mem.set(k, v), removeItem: (k) => void mem.delete(k) },
       },
     });
-    const { data, error } = await client.auth.signInWithPassword(USERS[key]);
+    const { data, error } = await retry('sign in ' + key, async () => {
+      const res = await client.auth.signInWithPassword(USERS[key]);
+      if (res.error && /fetch failed/i.test(res.error.message)) throw new Error(res.error.message);
+      return res;
+    });
     if (error || !data.session) throw new Error('Sign-in failed for test user ' + key + ': ' + (error?.message ?? 'no session'));
     const userId = data.user.id;
     await wipe(client, userId);
     if (key === 'B') {
-      const { error: e1 } = await client.from('settings').insert({ user_id: userId, name: 'QA Bee', currency: 'INR', theme: 'dark', onboarded: true });
+      const { error: e1 } = await client.from('settings').upsert({ user_id: userId, name: 'QA Bee', currency: 'INR', theme: 'dark', onboarded: true });
       if (e1) throw new Error(e1.message);
-      const { error: e2 } = await client.from('categories').insert(DEFAULT_CATEGORIES.map((c) => ({ ...c, user_id: userId })));
+      const { error: e2 } = await client.from('categories').upsert(DEFAULT_CATEGORIES.map((c) => ({ ...c, user_id: userId })));
       if (e2) throw new Error(e2.message);
     }
     tokens[key] = { accessToken: data.session.access_token, userId };

@@ -21,16 +21,35 @@ export function apiAs(user: UserKey): { db: SupabaseClient; userId: string } {
   return { db, userId: t.userId };
 }
 
+/** Retries transient network failures (the e2e host's connection to Supabase can blip). */
+export async function retry<T>(label: string, fn: () => Promise<T>, attempts = 4): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (!/fetch failed|ECONNRESET|ETIMEDOUT|socket|network/i.test(String((e as Error)?.message ?? e))) throw e;
+      await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+  throw new Error(label + ': ' + String((last as Error)?.message ?? last));
+}
+
 export async function wipe(db: SupabaseClient, userId: string) {
   for (const t of TABLES) {
-    const { error } = await db.from(t).delete().eq('user_id', userId);
-    if (error) throw new Error('wipe ' + t + ': ' + error.message);
+    await retry('wipe ' + t, async () => {
+      const { error } = await db.from(t).delete().eq('user_id', userId);
+      if (error) throw new Error('wipe ' + t + ': ' + error.message);
+    });
   }
 }
 
 export async function rows(user: UserKey, table: (typeof TABLES)[number]) {
   const { db } = apiAs(user);
-  const { data, error } = await db.from(table).select('*');
-  if (error) throw new Error(error.message);
-  return data as Record<string, unknown>[];
+  return retry('select ' + table, async () => {
+    const { data, error } = await db.from(table).select('*');
+    if (error) throw new Error(error.message);
+    return data as Record<string, unknown>[];
+  });
 }
