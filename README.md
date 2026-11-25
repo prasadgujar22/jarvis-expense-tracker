@@ -30,9 +30,9 @@ Bank or SMS auto-sync, shared household wallets, AI receipt scanning and cross-d
 
 ## Screenshots
 
-| Transactions | Budgets (light) | Mobile |
+| Transactions | Budgets | Mobile |
 |---|---|---|
-| ![Transactions](docs/screenshots/desktop-transactions-dark.png) | ![Budgets](docs/screenshots/desktop-budgets-light.png) | ![Mobile](docs/screenshots/mobile-dashboard-dark.png) |
+| ![Transactions](docs/screenshots/desktop-transactions-dark.png) | ![Budgets](docs/screenshots/desktop-budgets-dark.png) | ![Mobile](docs/screenshots/mobile-dashboard-dark.png) |
 
 ## Tech stack
 Vite · React 19 · TypeScript (strict) · Tailwind CSS v4 · Motion · Recharts · Zustand · date-fns · lucide-react · vite-plugin-pwa. Money is stored as integer paise to avoid floating-point errors.
