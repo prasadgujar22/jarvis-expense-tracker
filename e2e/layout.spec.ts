@@ -36,7 +36,9 @@ test('desktop sidebar stays pinned with the user card at the bottom while the pa
   const text = (await email.textContent())!.trim();
   expect(text).toContain('@');
   await expect(email).toHaveAttribute('title', text);
-  await expect(user).toHaveAccessibleName('Signed in as ' + text);
+  const nameEl = page.getByTestId('user-name');
+  const name = (await nameEl.count()) ? (await nameEl.textContent())!.trim() : '';
+  await expect(user).toHaveAccessibleName(['Signed in as', name, text].filter(Boolean).join(' '));
   await expect(page.getByTestId('sign-out')).toHaveAccessibleName('Sign out');
 
   // Still no horizontal scroll after switching overflow-x to clip.

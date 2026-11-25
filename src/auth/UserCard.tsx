@@ -56,7 +56,7 @@ export function SidebarUser() {
   return (
     <div
       role={email ? 'group' : undefined}
-      aria-labelledby={email ? id + '-label ' + id + '-email' : undefined}
+      aria-labelledby={email ? [id + '-label', name && id + '-name', id + '-email'].filter(Boolean).join(' ') : undefined}
       className="mt-auto flex shrink-0 items-center gap-3 border-t border-line px-2 pt-4"
       data-testid="sidebar-user"
     >
@@ -65,7 +65,11 @@ export function SidebarUser() {
       </span>
       <Avatar email={email} name={name} size={34} />
       <div className="min-w-0 flex-1 leading-tight">
-        {name && <div className="truncate text-sm font-semibold">{name}</div>}
+        {name && (
+          <div className="truncate text-sm font-semibold" id={id + '-name'} data-testid="user-name">
+            {name}
+          </div>
+        )}
         <div className={cn('truncate text-muted', name ? 'mt-0.5 text-xs' : 'text-[13px]')} data-testid="user-email" id={id + '-email'} title={email}>
           {email}
         </div>
