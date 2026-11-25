@@ -93,7 +93,8 @@ body {
   font-feature-settings: 'cv11', 'ss01';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow-x: hidden;
+  /* clip, not hidden: hidden makes html/body scroll containers and breaks position: sticky (sidebar, top bar). */
+  overflow-x: clip;
 }
 body {
   background-image: var(--k-glow);
