@@ -37,6 +37,9 @@ export async function retry<T>(label: string, fn: () => Promise<T>, attempts = 4
 }
 
 export async function wipe(db: SupabaseClient, userId: string) {
+  // Tombstones (deleted_ids) exist once that migration is applied; ignore the table if it isn't there yet.
+  const tomb = await db.from('deleted_ids').delete().eq('user_id', userId);
+  if (tomb.error && tomb.error.code !== 'PGRST205') throw new Error('wipe deleted_ids: ' + tomb.error.message);
   for (const t of TABLES) {
     await retry('wipe ' + t, async () => {
       const { error } = await db.from(t).delete().eq('user_id', userId);

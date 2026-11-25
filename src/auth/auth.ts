@@ -61,13 +61,30 @@ function friendlyRedirectError(error: string, code: string | null): string {
   return error.replace(/\+/g, ' ');
 }
 
+/** True only while the user's own sign-out runs: then (and only then) this user's local cache is deleted. */
+let explicitSignOut = false;
+
 function applySession(session: Session | null) {
   const prevUser = useAuth.getState().user;
   useAuth.setState({ session, user: session?.user ?? null, status: session ? 'signedIn' : 'signedOut' });
   if (session && supabase) {
     if (prevUser?.id !== session.user.id) startSync(supabase, session.user.id);
   } else if (prevUser) {
-    stopSync({ clearCache: true });
+    if (explicitSignOut) {
+      explicitSignOut = false;
+      stopSync({ clearCache: true });
+      return;
+    }
+    // The session ended on its own (expired/revoked refresh token, password changed elsewhere). Keep the cache and
+    // the pending queue: signing in again as the same user uploads them.
+    const pending = pendingCount();
+    stopSync({ clearCache: false });
+    setAuthNotice({
+      tone: 'info',
+      text:
+        'Your session ended. Sign in again to continue' +
+        (pending ? ' — ' + pending + ' unsynced change' + (pending === 1 ? ' is' : 's are') + ' kept on this device and will upload after you sign in.' : '.'),
+    });
   }
 }
 
@@ -107,6 +124,7 @@ export async function initAuth(): Promise<void> {
 export async function signOut(): Promise<void> {
   if (!supabase) return;
   if (pendingCount() > 0) await flush().catch(() => undefined);
+  explicitSignOut = true;
   const { error } = await supabase.auth.signOut({ scope: 'local' });
   if (error) {
     // Offline (or the server refused): forget the session on this device anyway.

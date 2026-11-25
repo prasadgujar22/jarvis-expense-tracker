@@ -92,6 +92,7 @@ export function LegacyImport() {
         <HardDriveUpload className="mt-0.5 h-5 w-5 shrink-0 text-accent" aria-hidden />
         <div className="text-sm">
           <p className="font-medium" data-testid="legacy-summary">{parts.length ? parts.join(' · ') : 'Your categories and preferences'}</p>
+          {legacy.demoSkipped > 0 && <p className="mt-1 text-xs text-muted" data-testid="legacy-demo-note">The sample data that came with the old version is left out.</p>}
           <p className="mt-1 text-muted">Import uploads it to your account so it syncs everywhere, then removes the local copy. Items that already exist in your account with the same id are replaced.</p>
         </div>
       </div>

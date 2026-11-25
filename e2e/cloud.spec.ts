@@ -1,6 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { apiAs, rows } from './support/api';
+import { USERS } from './support/env';
+import { tombstoneBackend } from './support/tombstones';
 import { asUser, expense, navigate, newUserContext, open, ready, row, submitTransaction, synced, test, type Route } from './fixtures';
 
 // Every flow here runs as user A against the real Supabase project, in order, starting from an empty account.
@@ -418,6 +420,163 @@ test('legacy v1 data on this device: import prompt uploads it and removes the lo
   await page.getByTestId('legacy-discard').click();
   await expect(page.getByTestId('legacy-import')).toBeHidden();
   expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('kosh:v1:')))).toEqual([]);
+});
+
+test('demo data from the old build is never offered as the user\'s own', async ({ page }) => {
+  const demoOnly = () =>
+    page.evaluate(() => {
+      localStorage.setItem('kosh:v1:meta', JSON.stringify({ initialized: true, schema: 1 }));
+      localStorage.setItem('kosh:v1:settings', JSON.stringify({ currency: 'INR', theme: 'dark', name: 'Aarav', lastAccountId: 'acc_hdfc' }));
+      localStorage.setItem('kosh:v1:accounts', JSON.stringify([{ id: 'acc_hdfc', name: 'Old HDFC', type: 'bank', openingBalance: 18500000, color: '#3b82f6', archived: false }]));
+      localStorage.setItem('kosh:v1:recurring', JSON.stringify([{ id: 'rec_netflix', title: 'Netflix demo', type: 'expense', amount: 64900, categoryId: 'cat_subscriptions', accountId: 'acc_hdfc', frequency: 'monthly', interval: 1, startDate: '2026-06-08', autoPost: true }]));
+      localStorage.setItem('kosh:v1:goals', JSON.stringify([{ id: 'goal_japan', name: 'Japan trip', target: 25000000, contributions: [] }]));
+      localStorage.setItem('kosh:v1:transactions', JSON.stringify([
+        { id: 'seed_1', type: 'expense', amount: 25000, categoryId: 'cat_food', accountId: 'acc_hdfc', date: '2026-11-01', payee: 'QA demo Swiggy' },
+        { id: 'rec:rec_netflix:2026-11-08', type: 'expense', amount: 64900, categoryId: 'cat_subscriptions', accountId: 'acc_hdfc', date: '2026-11-08', payee: 'Netflix demo', recurringId: 'rec_netflix' },
+      ]));
+    });
+  await open(page, 'transactions');
+  await synced(page);
+  // Only demo data: no prompt, and the leftovers are cleaned up.
+  await demoOnly();
+  await page.reload();
+  await ready(page, 'transactions');
+  await synced(page);
+  await expect(page.getByTestId('legacy-import')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('kosh:v1:')).length)).toBe(0);
+
+  // Demo data mixed with the user's own entry: only the user's entry (and the demo account it uses) is offered.
+  await demoOnly();
+  await page.evaluate(() => {
+    const txs = JSON.parse(localStorage.getItem('kosh:v1:transactions') || '[]');
+    txs.push({ id: 'tx_a1b2c3d4e5f6', type: 'expense', amount: 9900, categoryId: 'cat_food', accountId: 'acc_hdfc', date: '2026-11-22', payee: 'QA my own idli' });
+    localStorage.setItem('kosh:v1:transactions', JSON.stringify(txs));
+  });
+  await page.reload();
+  const dialog = page.getByTestId('legacy-import');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId('legacy-summary')).toHaveText('1 transaction · 1 account');
+  await expect(dialog.getByTestId('legacy-demo-note')).toBeVisible();
+  await dialog.getByTestId('legacy-import-confirm').click();
+  await expect(dialog).toBeHidden();
+  await synced(page);
+  const txs = await rows('A', 'transactions');
+  expect(txs.some((t) => t.id === 'tx_a1b2c3d4e5f6')).toBe(true);
+  expect(txs.some((t) => t.id === 'seed_1' || String(t.id).startsWith('rec:rec_netflix'))).toBe(false);
+  expect((await rows('A', 'goals')).some((g) => g.id === 'goal_japan')).toBe(false);
+  expect((await rows('A', 'recurring_rules')).some((r) => r.id === 'rec_netflix')).toBe(false);
+  expect((await rows('A', 'accounts')).some((a) => a.id === 'acc_hdfc')).toBe(true);
+  expect((await rows('A', 'settings'))[0]).toMatchObject({ name: 'QA Asha' });
+});
+
+test('a row the server rejects is set aside and does not block later changes', async ({ page }) => {
+  const { userId } = apiAs('A');
+  const badId = 'tx_' + 'x'.repeat(70); // the database allows ids of 1–64 characters
+  await open(page, 'transactions');
+  await synced(page);
+  await page.evaluate((bad) => {
+    localStorage.setItem('kosh:v1:transactions', JSON.stringify([
+      { id: bad, type: 'expense', amount: 1000, categoryId: 'cat_food', accountId: 'acc_legacy', date: '2026-11-23', payee: 'QA rejected row' },
+      { id: 'tx_okokokokokok', type: 'expense', amount: 2000, categoryId: 'cat_food', accountId: 'acc_legacy', date: '2026-11-23', payee: 'QA accepted row' },
+      { id: 'tx_zerozerozero', type: 'expense', amount: 0, categoryId: 'cat_food', accountId: 'acc_legacy', date: '2026-11-23', payee: 'QA zero row' },
+    ]));
+  }, badId);
+  await page.reload();
+  await expect(page.getByTestId('legacy-summary')).toHaveText('2 transactions'); // the ₹0 row is dropped client-side
+  await page.getByTestId('legacy-import-confirm').click();
+  await expect(page.getByTestId('toast').filter({ hasText: "couldn't be saved to the cloud" })).toBeVisible();
+  await synced(page);
+  // A later change still syncs: the queue is not stuck.
+  await page.keyboard.press('n');
+  await expense(page, 'QA after rejection', '77');
+  await synced(page);
+  const txs = await rows('A', 'transactions');
+  expect(txs.map((t) => t.payee)).toEqual(expect.arrayContaining(['QA accepted row', 'QA after rejection']));
+  expect(txs.some((t) => t.payee === 'QA rejected row' || t.payee === 'QA zero row')).toBe(false);
+  const rejected = await page.evaluate((uid) => JSON.parse(localStorage.getItem('kosh:v2:' + uid + ':rejected') || '[]'), userId);
+  expect(rejected).toEqual([expect.objectContaining({ table: 'transactions', id: badId })]);
+
+  // Values the client can fix are clamped to the schema instead of being rejected.
+  await open(page, 'settings');
+  await page.getByTestId('add-category').click();
+  await page.getByTestId('category-name').fill('QA ' + 'long name '.repeat(12));
+  await page.getByTestId('category-submit').click();
+  await synced(page);
+  const long = (await rows('A', 'categories')).find((c) => String(c.name).startsWith('QA long name'));
+  expect(String(long?.name).length).toBeLessThanOrEqual(80);
+});
+
+test('a deleted auto-posted occurrence is not re-posted by a device with a stale rule (tombstones)', async ({ page, context, browser }, info) => {
+  const tomb = await tombstoneBackend('A');
+  await tomb.attach(context);
+  const { db, userId } = apiAs('A');
+  const { error } = await db.from('recurring_rules').insert({
+    user_id: userId, id: 'rec_qa_tomb', title: 'QA Tomb rent', type: 'expense', amount: 1200000, category_id: 'cat_rent', account_id: await accountId(),
+    frequency: 'monthly', interval: 1, start_date: '2026-09-01', auto_post: true, active: true,
+  });
+  expect(error).toBeNull();
+  await open(page, 'transactions');
+  await synced(page);
+  await page.getByTestId('tx-search').fill('QA Tomb rent');
+  await expect(row(page, 'QA Tomb rent')).toHaveCount(3);
+  await page.locator('[data-tx-id="rec:rec_qa_tomb:2026-10-01"]').getByTestId('transaction-delete').click();
+  await expect(row(page, 'QA Tomb rent')).toHaveCount(2);
+  await synced(page);
+  expect(await tomb.ids()).toContain('rec:rec_qa_tomb:2026-10-01');
+
+  // Undo of a deleted occurrence is an explicit re-create: it removes the tombstone and syncs.
+  await page.locator('[data-tx-id="rec:rec_qa_tomb:2026-11-01"]').getByTestId('transaction-delete').click();
+  await page.getByTestId('toast-action').click();
+  await expect(row(page, 'QA Tomb rent')).toHaveCount(2);
+  await synced(page);
+  expect(await tomb.ids()).not.toContain('rec:rec_qa_tomb:2026-11-01');
+
+  // Another device whose copy of the rule is stale (postedThrough before October) auto-posts again on open.
+  await db.from('recurring_rules').update({ posted_through: '2026-09-01' }).eq('user_id', userId).eq('id', 'rec_qa_tomb');
+  const stale = await newUserContext(browser, info, 'A');
+  try {
+    await tomb.attach(stale.context);
+    await open(stale.page, 'transactions');
+    await synced(stale.page);
+    await stale.page.getByTestId('tx-search').fill('QA Tomb rent');
+    await expect(row(stale.page, 'QA Tomb rent')).toHaveCount(2);
+    await expect(stale.page.locator('[data-tx-id="rec:rec_qa_tomb:2026-10-01"]')).toHaveCount(0);
+  } finally {
+    await stale.context.close();
+  }
+  const ids = (await rows('A', 'transactions')).filter((t) => t.recurring_id === 'rec_qa_tomb').map((t) => t.id).sort();
+  expect(ids).toEqual(['rec:rec_qa_tomb:2026-09-01', 'rec:rec_qa_tomb:2026-11-01']);
+});
+
+test('a forced sign-out (session revoked) keeps unsynced changes and uploads them after signing in again', async ({ page, context }) => {
+  const { userId } = apiAs('A');
+  await open(page, 'transactions');
+  await synced(page);
+  await context.setOffline(true);
+  await expect(page.getByTestId('sync-status')).toHaveAttribute('data-state', 'offline');
+  await page.keyboard.press('n');
+  await expense(page, 'QA kept through sign-out', '64');
+  await expect(page.getByTestId('sync-status')).toHaveAttribute('data-pending', '1');
+  // The session dies on its own: expired access token and a refresh token the server no longer knows.
+  await page.evaluate(() => {
+    const key = Object.keys(localStorage).find((k) => /^sb-.*-auth-token$/.test(k))!;
+    const s = JSON.parse(localStorage.getItem(key)!);
+    localStorage.setItem(key, JSON.stringify({ ...s, expires_at: 1, refresh_token: 'revoked0000' }));
+  });
+  await context.setOffline(false);
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(page.getByTestId('auth-screen')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('auth-notice')).toContainText('1 unsynced change is kept on this device');
+  const queue = await page.evaluate((uid) => Object.keys(JSON.parse(localStorage.getItem('kosh:v2:' + uid + ':queue') || '{}')), userId);
+  expect(queue).toHaveLength(1);
+  expect((await rows('A', 'transactions')).some((t) => t.payee === 'QA kept through sign-out')).toBe(false);
+
+  await page.getByTestId('auth-email').fill(USERS.A.email);
+  await page.getByTestId('auth-password').fill(USERS.A.password);
+  await page.getByTestId('auth-submit').click();
+  await ready(page, 'transactions');
+  await synced(page);
+  await expect.poll(async () => (await rows('A', 'transactions')).some((t) => t.payee === 'QA kept through sign-out')).toBe(true);
 });
 
 test('row-level security: user B sees none of user A\'s data (UI and REST)', async ({ browser }, info) => {

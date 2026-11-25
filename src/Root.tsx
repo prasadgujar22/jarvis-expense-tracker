@@ -19,8 +19,17 @@ const clean = (p: string) => p.replace(/\/+$/, '') || '/';
 
 /** Only same-origin app paths are accepted as a post-login destination. */
 function safeNext(v: string | null | undefined): string | null {
-  if (!v || !v.startsWith('/') || v.startsWith('//') || v.startsWith('/login') || v.startsWith('/reset-password')) return null;
-  return v;
+  if (!v || !v.startsWith('/') || v.includes('\\')) return null;
+  let url: URL;
+  try {
+    url = new URL(v, window.location.origin);
+  } catch {
+    return null;
+  }
+  if (url.origin !== window.location.origin) return null;
+  const path = url.pathname + url.search;
+  if (path.startsWith('/login') || path.startsWith('/reset-password')) return null;
+  return path;
 }
 
 export default function Root() {

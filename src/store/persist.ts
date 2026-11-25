@@ -65,7 +65,7 @@ export const DEVICE_THEME_KEY = 'kosh:theme';
 // v2: per-user cache  kosh:v2:<userId>:<slice|settings|queue|meta>
 // ---------------------------------------------------------------------------------------------
 export const v2Prefix = (userId: string) => 'kosh:v2:' + userId + ':';
-export const v2Key = (userId: string, name: SliceKey | 'settings' | 'queue' | 'meta') => v2Prefix(userId) + name;
+export const v2Key = (userId: string, name: SliceKey | 'settings' | 'queue' | 'meta' | 'rejected') => v2Prefix(userId) + name;
 
 export interface CachedState {
   data: DataState;
@@ -98,6 +98,40 @@ export interface LegacyData {
   data: DataState;
   settings: Settings;
   counts: { transactions: number; accounts: number; budgets: number; recurring: number; goals: number };
+  /** Items from the old build's built-in demo data that were left out. */
+  demoSkipped: number;
+}
+
+// The pre-account build seeded every new device with demo data under fixed ids (real items use random ids).
+const DEMO_ACCOUNTS = new Set(['acc_cash', 'acc_hdfc', 'acc_icici', 'acc_gpay']);
+const DEMO_RULES = new Set(['rec_salary', 'rec_rent', 'rec_sip', 'rec_netflix', 'rec_spotify', 'rec_prime', 'rec_jio', 'rec_electricity', 'rec_airtel', 'rec_gym']);
+const DEMO_BUDGETS = new Set(['bud_overall', 'bud_food', 'bud_groceries', 'bud_transport', 'bud_shopping', 'bud_entertainment', 'bud_bills']);
+const DEMO_GOALS = new Set(['goal_emergency', 'goal_japan', 'goal_macbook']);
+const DEMO_NAME = 'Aarav';
+
+function isDemoTransaction(t: { id: string; recurringId: string | null }): boolean {
+  if (t.id.startsWith('seed_')) return true;
+  const m = /^rec:([^:]+):/.exec(t.id);
+  return !!m && DEMO_RULES.has(m[1]);
+}
+
+/** Remove the demo items; keep a demo account only if the user's own transactions or rules use it. */
+export function stripDemoData(data: DataState): { data: DataState; skipped: number } {
+  const transactions = data.transactions.filter((t) => !isDemoTransaction(t));
+  const recurring = data.recurring.filter((r) => !DEMO_RULES.has(r.id));
+  const used = new Set<string>();
+  for (const t of transactions) {
+    used.add(t.accountId);
+    if (t.toAccountId) used.add(t.toAccountId);
+  }
+  for (const r of recurring) used.add(r.accountId);
+  const accounts = data.accounts.filter((a) => !DEMO_ACCOUNTS.has(a.id) || used.has(a.id));
+  const budgets = data.budgets.filter((b) => !DEMO_BUDGETS.has(b.id));
+  const goals = data.goals.filter((g) => !DEMO_GOALS.has(g.id));
+  const skipped =
+    data.transactions.length - transactions.length + data.recurring.length - recurring.length + data.accounts.length - accounts.length +
+    data.budgets.length - budgets.length + data.goals.length - goals.length;
+  return { data: { categories: data.categories, accounts, transactions, budgets, recurring, goals }, skipped };
 }
 
 export function hasLegacyData(): boolean {
@@ -112,15 +146,18 @@ export function hasLegacyData(): boolean {
 /** Reads kosh:v1:* (validated). Returns null when there is nothing worth importing. */
 export function loadLegacyData(): LegacyData | null {
   if (!hasLegacyData()) return null;
-  const data = {} as DataState;
-  for (const s of SLICES) (data as Record<SliceKey, unknown>)[s] = validSlice(s, readJSON(V1(s))) ?? [];
+  const raw = {} as DataState;
+  for (const s of SLICES) (raw as Record<SliceKey, unknown>)[s] = validSlice(s, readJSON(V1(s))) ?? [];
+  const { data, skipped } = stripDemoData(raw);
   const settings = validSettings(readJSON(V1('settings')) ?? DEFAULT_SETTINGS);
+  if (settings.name === DEMO_NAME) settings.name = '';
   const counts = {
     transactions: data.transactions.length, accounts: data.accounts.length, budgets: data.budgets.length,
     recurring: data.recurring.length, goals: data.goals.length,
   };
-  const anything = counts.transactions + counts.accounts + counts.budgets + counts.recurring + counts.goals + data.categories.length > 0;
-  return anything ? { data, settings, counts } : null;
+  // Categories alone (the defaults every install had) are not worth an import prompt.
+  const anything = counts.transactions + counts.accounts + counts.budgets + counts.recurring + counts.goals > 0;
+  return anything ? { data, settings, counts, demoSkipped: skipped } : null;
 }
 
 export function clearLegacyData(): void {

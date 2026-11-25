@@ -29,11 +29,16 @@ const ms = (v: unknown): number | undefined => {
   return Number.isNaN(t) ? undefined : t;
 };
 
+/** Names must be 1–80 chars (titles 1–120) in the database. */
+function clampName(v: string, fallback: string, max = 80): string {
+  return (v ?? '').trim().slice(0, max) || fallback;
+}
+
 export function categoryToRow(c: Category): Row {
-  return { id: c.id, name: c.name, kind: c.kind, icon: c.icon, color: c.color };
+  return { id: c.id, name: clampName(c.name, 'Category'), kind: c.kind, icon: c.icon, color: c.color };
 }
 export function accountToRow(a: Account): Row {
-  return { id: a.id, name: a.name, type: a.type, opening_balance: a.openingBalance, color: a.color, archived: a.archived };
+  return { id: a.id, name: clampName(a.name, 'Account'), type: a.type, opening_balance: a.openingBalance, color: a.color, archived: a.archived };
 }
 export function transactionToRow(t: Transaction): Row {
   return {
@@ -46,13 +51,13 @@ export function budgetToRow(b: Budget): Row {
 }
 export function recurringToRow(r: RecurringRule): Row {
   return {
-    id: r.id, title: r.title.slice(0, 120), type: r.type, amount: r.amount, category_id: r.categoryId, account_id: r.accountId,
-    frequency: r.frequency, interval: r.interval, start_date: r.startDate, end_date: r.endDate, auto_post: r.autoPost,
+    id: r.id, title: clampName(r.title, 'Recurring', 120), type: r.type, amount: r.amount, category_id: r.categoryId, account_id: r.accountId,
+    frequency: r.frequency, interval: Math.min(365, Math.max(1, Math.round(r.interval) || 1)), start_date: r.startDate, end_date: r.endDate, auto_post: r.autoPost,
     is_subscription: r.isSubscription, posted_through: r.postedThrough, active: r.active,
   };
 }
 export function goalToRow(g: Goal): Row {
-  return { id: g.id, name: g.name, target: g.target, target_date: g.targetDate, emoji: g.emoji, color: g.color, contributions: g.contributions, created_at: iso(g.createdAt) };
+  return { id: g.id, name: clampName(g.name, 'Goal'), target: g.target, target_date: g.targetDate, emoji: g.emoji, color: g.color, contributions: g.contributions, created_at: iso(g.createdAt) };
 }
 export function settingsToRow(s: Settings): Row {
   return { currency: s.currency, theme: s.theme, name: s.name.slice(0, 80), last_account_id: s.lastAccountId, onboarded: s.onboarded };

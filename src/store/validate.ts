@@ -17,7 +17,7 @@ export function validCategory(v: unknown): Category | null {
   const id = str(v.id);
   const name = str(v.name).trim();
   if (!id || !name || !kind) return null;
-  return { id, name, kind, icon: str(v.icon, 'tag'), color: color(v.color) };
+  return { id, name: name.slice(0, 80), kind, icon: str(v.icon, 'tag'), color: color(v.color) };
 }
 
 export function validAccount(v: unknown): Account | null {
@@ -27,7 +27,7 @@ export function validAccount(v: unknown): Account | null {
   const name = str(v.name).trim();
   const ob = int(v.openingBalance);
   if (!id || !name || !type || ob === null) return null;
-  return { id, name, type, openingBalance: ob, color: color(v.color, '#14b8a6'), archived: v.archived === true };
+  return { id, name: name.slice(0, 80), type, openingBalance: ob, color: color(v.color, '#14b8a6'), archived: v.archived === true };
 }
 
 export function validTransaction(v: unknown): Transaction | null {
@@ -36,7 +36,7 @@ export function validTransaction(v: unknown): Transaction | null {
   const id = str(v.id);
   const amount = int(v.amount);
   const accountId = str(v.accountId);
-  if (!id || !type || amount === null || amount < 0 || !accountId || !isISODate(v.date)) return null;
+  if (!id || !type || amount === null || amount <= 0 || !accountId || !isISODate(v.date)) return null;
   const toAccountId = nullableStr(v.toAccountId);
   if (type === 'transfer' && !toAccountId) return null;
   const categoryId = nullableStr(v.categoryId);
@@ -72,8 +72,8 @@ export function validRecurring(v: unknown): RecurringRule | null {
   if (!categoryId || !accountId) return null;
   return {
     id, type, frequency, amount, categoryId, accountId,
-    title: str(v.title, 'Recurring'),
-    interval: Math.max(1, int(v.interval) ?? 1),
+    title: str(v.title).trim().slice(0, 120) || 'Recurring',
+    interval: Math.min(365, Math.max(1, int(v.interval) ?? 1)),
     startDate: v.startDate,
     endDate: isISODate(v.endDate) ? v.endDate : null,
     autoPost: v.autoPost === true,
@@ -97,7 +97,7 @@ export function validGoal(v: unknown): Goal | null {
   const name = str(v.name).trim();
   if (!id || !name || target === null || target <= 0) return null;
   return {
-    id, name, target,
+    id, name: name.slice(0, 80), target,
     targetDate: isISODate(v.targetDate) ? v.targetDate : null,
     emoji: str(v.emoji, '🎯') || '🎯',
     color: color(v.color, '#10b981'),
