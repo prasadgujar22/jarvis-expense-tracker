@@ -214,7 +214,7 @@ function isNetworkError(e: unknown): boolean {
   // PostgREST / Postgres errors carry a code (e.g. 57014 statement timeout): those are server errors, not offline.
   if (errCode(e)) return false;
   const msg = e instanceof Error ? e.message : typeof e === 'object' && e && 'message' in e ? String((e as { message: unknown }).message) : String(e);
-  return /failed to fetch|networkerror|network request failed|load failed|fetch failed|ERR_INTERNET|request timed out|AbortError/i.test(msg);
+  return /failed to fetch|networkerror|network request failed|load failed|fetch failed|ERR_INTERNET|timed out|TimeoutError|AbortError/i.test(msg);
 }
 /** The row itself is unacceptable (check/not-null/type/length violation): retrying can never succeed. */
 function isDataError(e: unknown): boolean {

@@ -17,6 +17,8 @@ export function apiAs(user: UserKey): { db: SupabaseClient; userId: string } {
   const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
     accessToken: async () => t.accessToken,
     auth: { persistSession: false },
+    // The e2e host's link to Supabase occasionally stalls: give up after 15s and let retry() try again.
+    global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(15_000) }) },
   });
   return { db, userId: t.userId };
 }
@@ -29,7 +31,7 @@ export async function retry<T>(label: string, fn: () => Promise<T>, attempts = 4
       return await fn();
     } catch (e) {
       last = e;
-      if (!/fetch failed|ECONNRESET|ETIMEDOUT|socket|network/i.test(String((e as Error)?.message ?? e))) throw e;
+      if (!/fetch failed|ECONNRESET|ETIMEDOUT|socket|network|aborted|timed? ?out/i.test(String((e as Error)?.message ?? e))) throw e;
       await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
     }
   }

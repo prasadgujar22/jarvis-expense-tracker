@@ -508,7 +508,8 @@ test('a row the server rejects is set aside and does not block later changes', a
 
 test('a deleted auto-posted occurrence is not re-posted by a device with a stale rule (tombstones)', async ({ page, context, browser }, info) => {
   const tomb = await tombstoneBackend('A');
-  test.info().annotations.push({ type: 'tombstones', description: tomb.real ? 'real deleted_ids table' : 'mocked (migration not applied)' });
+  // The migration is applied, so test the real table; set E2E_TOMBSTONE_MOCK=1 to exercise the client against a mock instead.
+  if (!process.env.E2E_TOMBSTONE_MOCK) expect(tomb.real, 'deleted_ids table must exist (apply 20261125130000_deleted_ids.sql)').toBe(true);
   await tomb.attach(context);
   const { db, userId } = apiAs('A');
   const { error } = await db.from('recurring_rules').insert({
