@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { LogOut } from 'lucide-react';
 import { useAuth, signOut } from './auth';
 import { useSync } from '../sync/sync';
@@ -52,15 +52,37 @@ export function SidebarUser() {
   const email = useAuth((s) => s.user?.email ?? '');
   const name = useStore((s) => s.settings.name);
   const { request, dialog, busy } = useSignOut();
+  const id = useId();
   return (
-    <div className="mt-auto flex items-center gap-3 rounded-2xl border border-line bg-surface-2/60 p-3" data-testid="sidebar-user">
-      <Avatar email={email} name={name} />
+    <div
+      role={email ? 'group' : undefined}
+      aria-labelledby={email ? [id + '-label', name && id + '-name', id + '-email'].filter(Boolean).join(' ') : undefined}
+      className="mt-auto flex shrink-0 items-center gap-3 border-t border-line px-2 pt-4"
+      data-testid="sidebar-user"
+    >
+      <span id={id + '-label'} hidden>
+        Signed in as
+      </span>
+      <Avatar email={email} name={name} size={34} />
       <div className="min-w-0 flex-1 leading-tight">
-        {name && <div className="truncate text-sm font-semibold">{name}</div>}
-        <div className="truncate text-xs text-muted" data-testid="user-email" title={email}>{email}</div>
+        {name && (
+          <div className="truncate text-sm font-semibold" id={id + '-name'} data-testid="user-name">
+            {name}
+          </div>
+        )}
+        <div className={cn('truncate text-muted', name ? 'mt-0.5 text-xs' : 'text-[13px]')} data-testid="user-email" id={id + '-email'} title={email}>
+          {email}
+        </div>
       </div>
-      <IconButton label="Sign out" size="icon-sm" onClick={request} disabled={busy} data-testid="sign-out">
-        <LogOut className="h-4 w-4" />
+      <IconButton
+        label="Sign out"
+        size="icon-sm"
+        onClick={request}
+        disabled={busy}
+        className="-mr-1 hover:bg-danger-soft! hover:text-danger! focus-visible:text-fg"
+        data-testid="sign-out"
+      >
+        <LogOut className="h-4 w-4" aria-hidden />
       </IconButton>
       {dialog}
     </div>

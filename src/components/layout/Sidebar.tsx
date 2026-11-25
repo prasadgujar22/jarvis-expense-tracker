@@ -12,19 +12,19 @@ export function Sidebar() {
   const path = matchRoute(usePath());
   const openQuickAdd = useUI((s) => s.openQuickAdd);
   return (
-    <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-line bg-surface/40 px-4 py-5 lg:flex" aria-label="Sidebar">
-      <Link to="/" className="mb-7 flex items-center gap-2.5 px-2">
+    <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col self-start overflow-hidden border-r border-line bg-surface/40 px-4 py-5 lg:flex" aria-label="Sidebar">
+      <Link to="/" className="mb-7 flex shrink-0 items-center gap-2.5 px-2" data-testid="sidebar-logo">
         <Logo size={32} />
         <div className="leading-tight">
           <div className="text-[17px] font-semibold tracking-tight">Kosh</div>
           <div className="text-[11px] text-subtle">Every rupee, accounted for.</div>
         </div>
       </Link>
-      <Button variant="primary" className="mb-6 w-full" icon={<Plus className="h-4 w-4" aria-hidden />} onClick={() => openQuickAdd()} data-testid="quick-add-button">
+      <Button variant="primary" className="mb-6 w-full shrink-0" icon={<Plus className="h-4 w-4" aria-hidden />} onClick={() => openQuickAdd()} data-testid="quick-add-button">
         Add transaction
         <kbd className="ml-auto rounded-md bg-black/10 px-1.5 py-0.5 text-[10px] font-semibold">N</kbd>
       </Button>
-      <nav aria-label="Main">
+      <nav aria-label="Main" className="-mx-1 -my-1 min-h-0 flex-1 overflow-y-auto px-1 py-1 [scrollbar-width:thin]">
         <ul className="space-y-0.5">
           {NAV.map((item) => {
             const active = path === item.path;

@@ -1,0 +1,101 @@
+import { expect } from '@playwright/test';
+import { asUser, open, test } from './fixtures';
+
+// Regression: overflow-x: hidden on html/body made them scroll containers, so the sticky sidebar scrolled
+// away and the user card floated mid-screen. The sidebar must stay pinned at any page length.
+test.use(asUser('B'));
+
+test('desktop sidebar stays pinned with the user card at the bottom while the page scrolls', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 600 });
+  await open(page, 'dashboard');
+
+  // The bug is about scrolling, not empty-state height: make sure the document is well above the viewport.
+  await page.evaluate(() => {
+    const main = document.getElementById('main')!;
+    main.style.minHeight = window.innerHeight * 3 + 'px';
+  });
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const scrollY = await page.evaluate(() => window.scrollY);
+  expect(scrollY, 'the page should actually scroll').toBeGreaterThan(600);
+
+  const sidebar = page.getByRole('complementary', { name: 'Sidebar' });
+  const user = page.getByTestId('sidebar-user');
+  await expect(user).toBeInViewport();
+  const box = (await user.boundingBox())!;
+  // The aside has py-5 (20px) of bottom padding; allow a few px of slack.
+  expect(600 - (box.y + box.height), 'user card bottom gap').toBeLessThanOrEqual(28);
+  expect(box.y, 'user card is near the bottom, not mid-screen').toBeGreaterThan(600 / 2);
+
+  const asideBox = (await sidebar.boundingBox())!;
+  expect(asideBox.y).toBeCloseTo(0, 0);
+  expect(asideBox.height).toBeCloseTo(600, 0);
+  await expect(page.getByTestId('sidebar-logo')).toBeInViewport();
+  await expect(page.getByTestId('nav-dashboard')).toBeInViewport();
+
+  const email = page.getByTestId('user-email');
+  const text = (await email.textContent())!.trim();
+  expect(text).toContain('@');
+  await expect(email).toHaveAttribute('title', text);
+  const nameEl = page.getByTestId('user-name');
+  const name = (await nameEl.count()) ? (await nameEl.textContent())!.trim() : '';
+  await expect(user).toHaveAccessibleName(['Signed in as', name, text].filter(Boolean).join(' '));
+  await expect(page.getByTestId('sign-out')).toHaveAccessibleName('Sign out');
+
+  // overflow-x: clip hides page-wide overflow from scrollWidth, so measure element boxes instead: nothing in
+  // main may poke past the viewport unless an inner overflow container (e.g. a scrolling chip row) clips it.
+  const outside = await page.evaluate(() => {
+    const width = document.documentElement.clientWidth;
+    const main = document.getElementById('main')!;
+    const clippedInside = (el: Element) => {
+      for (let p = el.parentElement; p && p !== main; p = p.parentElement) {
+        if (getComputedStyle(p).overflowX !== 'visible') return true;
+      }
+      return false;
+    };
+    return [...main.querySelectorAll('*')]
+      .filter((el) => {
+        const b = el.getBoundingClientRect();
+        return b.width && b.right > width + 1 && !clippedInside(el);
+      })
+      .slice(0, 8)
+      .map((el) => el.outerHTML.slice(0, 200));
+  });
+  expect(outside, 'elements past the right edge of the viewport').toEqual([]);
+});
+
+test('desktop sidebar stays pinned while Quick Add is open and the page is scrolled', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 600 });
+  await open(page, 'dashboard');
+  await page.evaluate(() => {
+    document.getElementById('main')!.style.minHeight = window.innerHeight * 3 + 'px';
+    window.scrollTo(0, window.innerHeight);
+  });
+
+  await page.getByTestId('quick-add-button').click();
+  await expect(page.getByTestId('quick-add-modal')).toBeVisible();
+  const before = await page.evaluate(() => window.scrollY);
+  await page.mouse.move(512, 300);
+  await page.mouse.wheel(0, 1200);
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => window.scrollY), 'background page is scroll-locked').toBe(before);
+  // body must not have become a scroll container of its own
+  expect(await page.evaluate(() => document.body.scrollTop)).toBe(0);
+
+  const asideBox = (await page.getByRole('complementary', { name: 'Sidebar' }).boundingBox())!;
+  expect(asideBox.y).toBeCloseTo(0, 0);
+  expect(asideBox.height).toBeCloseTo(600, 0);
+  const box = (await page.getByTestId('sidebar-user').boundingBox())!;
+  expect(600 - (box.y + box.height)).toBeLessThanOrEqual(28);
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('quick-add-modal')).toBeHidden();
+  // The Modal unlocks in an effect cleanup that can land just after the node is gone.
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.overflow)).toBe('');
+});
+
+test('at 390px the desktop sidebar is hidden and the bottom nav shows', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, 'dashboard');
+  await expect(page.getByRole('complementary', { name: 'Sidebar' })).toBeHidden();
+  await expect(page.getByTestId('mnav-dashboard')).toBeVisible();
+});

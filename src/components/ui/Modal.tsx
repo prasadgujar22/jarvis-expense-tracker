@@ -8,6 +8,8 @@ import { IconButton } from './Button';
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 let openCount = 0;
+/** <html> inline overflow from before the first open modal; restored when the last one closes. */
+let savedOverflow = '';
 export function isModalOpen(): boolean {
   return openCount > 0;
 }
@@ -39,8 +41,14 @@ function ModalInner({ onClose, title, description, children, footer, size = 'md'
   useEffect(() => {
     openCount++;
     const prevFocus = document.activeElement as HTMLElement | null;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    // Lock the viewport via <html>: overflow on <body> doesn't propagate to the viewport because html has a
+    // non-visible overflow-x (clip, or hidden as the fallback), so it would make body a scroll container and
+    // break position: sticky while the dialog is open. Keep html's overflow-x non-visible for this to hold.
+    const html = document.documentElement;
+    if (openCount === 1) {
+      savedOverflow = html.style.overflow;
+      html.style.overflow = 'hidden';
+    }
     // Focus synchronously on mount; never steal focus from an element the user (or a test)
     // has already focused inside the dialog — a delayed focus can hijack in-progress typing.
     const focusInitial = () => {
@@ -80,7 +88,7 @@ function ModalInner({ onClose, title, description, children, footer, size = 'md'
       openCount--;
       window.clearTimeout(t);
       document.removeEventListener('keydown', onKey, true);
-      if (openCount === 0) document.body.style.overflow = prevOverflow;
+      if (openCount === 0) html.style.overflow = savedOverflow;
       prevFocus?.focus?.();
     };
   }, [initialFocusRef]);
