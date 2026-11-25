@@ -1,17 +1,23 @@
 import { expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { expense, open, ready, row, test } from './fixtures';
+import { FIXED_NOW, expense, freezeDate, navigate, open, ready, row, test, type Route } from './fixtures';
+
+/** Load the route on first use, then move around with in-app navigation like a user would (no reloads). */
+async function go(page: Page, route: Route, isMobile: boolean) {
+  if (page.url() === 'about:blank') await open(page, route);
+  else await navigate(page, route, isMobile);
+}
 
 /** Number of transactions whose payee/note/tags match `query` on the Transactions page. */
-async function countMatching(page: Page, query: string) {
-  await open(page, 'transactions');
+async function countMatching(page: Page, query: string, isMobile: boolean) {
+  await go(page, 'transactions', isMobile);
   await page.getByTestId('tx-search').fill(query);
   await expect(page.getByTestId('transaction-list').or(page.getByTestId('empty-state'))).toBeVisible();
   return page.getByTestId('transaction-row').filter({ hasText: query }).count();
 }
 
-async function editRecurring(page: Page, title: string, change: (dialog: ReturnType<Page['getByTestId']>) => Promise<void>) {
-  await open(page, 'recurring');
+async function editRecurring(page: Page, isMobile: boolean, title: string, change: (dialog: ReturnType<Page['getByTestId']>) => Promise<void>) {
+  await go(page, 'recurring', isMobile);
   await page.getByRole('button', { name: 'Edit ' + title, exact: true }).click();
   const dialog = page.getByTestId('recurring-modal');
   await expect(dialog).toBeVisible();
@@ -31,10 +37,10 @@ async function openCsvImport(page: Page, name: string, csv: string) {
 }
 
 test.describe('recurring rules', () => {
-  test('changing a rule start date does not duplicate its posted transactions', async ({ page }) => {
-    const before = await countMatching(page, 'Netflix');
+  test('changing a rule start date does not duplicate its posted transactions', async ({ page, isMobile }) => {
+    const before = await countMatching(page, 'Netflix', isMobile);
     expect(before).toBeGreaterThan(3);
-    await editRecurring(page, 'Netflix', async (dialog) => {
+    await editRecurring(page, isMobile, 'Netflix', async (dialog) => {
       const start = dialog.getByLabel('Starts / first due');
       const value = await start.inputValue();
       // Shift the day of month by one (e.g. 2026-06-08 → 2026-06-09).
@@ -42,7 +48,7 @@ test.describe('recurring rules', () => {
       await start.fill(value.slice(0, 8) + String(day === 28 ? 27 : day + 1).padStart(2, '0'));
     });
     await expect(page.getByTestId('toast')).toContainText('Recurring saved');
-    expect(await countMatching(page, 'Netflix')).toBe(before);
+    expect(await countMatching(page, 'Netflix', isMobile)).toBe(before);
     // And reloading (which re-runs auto-posting) still adds nothing.
     await page.reload();
     await ready(page, 'transactions');
@@ -50,29 +56,45 @@ test.describe('recurring rules', () => {
     await expect(row(page, 'Netflix')).toHaveCount(before);
   });
 
-  test('moving a rule to an earlier day keeps the next payment due', async ({ page }) => {
-    await editRecurring(page, 'Netflix', async (dialog) => {
+  test('moving a rule to an earlier day keeps the next payment due', async ({ page, isMobile }) => {
+    await editRecurring(page, isMobile, 'Netflix', async (dialog) => {
       const start = dialog.getByLabel('Starts / first due');
       const value = await start.inputValue();
       await start.fill(value.slice(0, 8) + '07');
     });
-    await open(page, 'recurring');
+    await go(page, 'recurring', isMobile);
     // Nov 8 was paid under the old schedule; the new schedule's next charge is 7 Dec.
     await expect(page.getByTestId('recurring-rule').filter({ hasText: 'Netflix' })).toContainText('next 7 Dec');
   });
 
-  test('resuming a paused rule does not back-post the payments missed while paused', async ({ page }) => {
-    await editRecurring(page, 'Netflix', async (dialog) => {
+  test('resuming a paused rule does not back-post the payments missed while paused', async ({ page, context, browser, isMobile }, info) => {
+    const rentBefore = await countMatching(page, 'House rent', isMobile);
+    await editRecurring(page, isMobile, 'Netflix', async (dialog) => {
       await dialog.getByRole('switch', { name: 'Active' }).click();
     });
-    // Three months pass while Netflix is paused.
-    await page.clock.setFixedTime(new Date('2027-02-25T12:00:00+05:30'));
-    const paused = await countMatching(page, 'Netflix');
-    await editRecurring(page, 'Netflix', async (dialog) => {
-      await expect(dialog.getByRole('switch', { name: 'Active' })).toHaveAttribute('aria-checked', 'false');
-      await dialog.getByRole('switch', { name: 'Active' }).click();
+
+    // Three months pass while Netflix is paused. Model that as the user reopening the app later: carry the saved
+    // data (localStorage) into a fresh context whose clock starts in February before anything loads.
+    const { baseURL, viewport, hasTouch, colorScheme, reducedMotion, locale, timezoneId } = info.project.use;
+    const later = await browser.newContext({
+      baseURL, viewport, isMobile, hasTouch, colorScheme, reducedMotion, locale, timezoneId,
+      storageState: await context.storageState(),
     });
-    expect(await countMatching(page, 'Netflix')).toBe(paused);
+    try {
+      const laterPage = await later.newPage();
+      // Never move Playwright's page.clock forward for this: it skews animation timing (see freezeDate()).
+      await freezeDate(laterPage, new Date('2027-02-25T12:00:00+05:30'));
+      const paused = await countMatching(laterPage, 'Netflix', isMobile);
+      await editRecurring(laterPage, isMobile, 'Netflix', async (dialog) => {
+        await expect(dialog.getByRole('switch', { name: 'Active' })).toHaveAttribute('aria-checked', 'false');
+        await dialog.getByRole('switch', { name: 'Active' }).click();
+      });
+      expect(await countMatching(laterPage, 'Netflix', isMobile)).toBe(paused);
+      // Sanity: other auto-posting rules did catch up to February, so time really moved on.
+      expect(await countMatching(laterPage, 'House rent', isMobile)).toBe(rentBefore + 3);
+    } finally {
+      await later.close();
+    }
   });
 });
 
@@ -157,11 +179,9 @@ test('a goal can be saved with a target date in the past', async ({ page }) => {
 });
 
 test('changes made in one tab appear in another without losing either', async ({ page, context, isMobile }) => {
-  await open(page, 'transactions');
   const other = await context.newPage();
-  await other.clock.setFixedTime(new Date('2026-11-25T12:00:00+05:30'));
-  await other.goto('/transactions');
-  await ready(other, 'transactions');
+  await freezeDate(other, FIXED_NOW);
+  await Promise.all([open(page, 'transactions'), open(other, 'transactions')]);
 
   await page.bringToFront();
   await page.keyboard.press('n');
